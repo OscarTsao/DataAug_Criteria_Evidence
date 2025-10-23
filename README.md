@@ -1,50 +1,15 @@
-# AI/ML Experiment Template
+# PSY Agents NO-AUG
 
-Minimal template for ML experiments using PyTorch, Transformers, MLflow, and Optuna.
+All project documentation now resides in the [`docs/`](docs/) directory.
 
-## Quickstart
+Primary entry points:
+- `docs/README.md` – project overview and repository structure
+- `docs/QUICK_START.md` – quick setup and usage guide
+- `docs/CI_CD_SETUP.md` – CI/CD pipeline reference
+- `docs/TESTING.md` – testing strategy and commands
 
-- Python 3.10+ recommended.
-- Create and activate a virtual environment, then install:
+Additional guides are available alongside these files for setup, training
+infrastructure, data pipeline details, and CLI/Makefile usage.
 
-```
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -e '.[dev]'
-```
-
-## Layout
-
-- `src/Project/SubProject/models/model.py` – example model wrapper for Transformers.
-- `src/Project/SubProject/utils/` – utility helpers (`get_logger`, `set_seed`, MLflow helpers).
-- `mlruns/` – local MLflow runs (if using file-based tracking).
-- `outputs/` – suggested place for artifacts.
-
-## MLflow
-
-Configure MLflow for local tracking and run logging:
-
-```python
-from Project.SubProject.utils import configure_mlflow, enable_autologging, mlflow_run
-
-configure_mlflow(tracking_uri="file:./mlruns", experiment="demo")
-enable_autologging()
-
-with mlflow_run("hello", tags={"stage": "dev"}, params={"lr": 1e-4}):
-    # your training loop here
-    pass
-```
-
-## Development
-
-- Run linters/formatters:
-```
-ruff check src tests
-black src tests
-```
-- Run tests (add your own under `tests/`):
-```
-pytest
-```
-
+Model implementations for the four supported architectures live in
+`src/psy_agents_noaug/architectures/` (`criteria`, `evidence`, `share`, `joint`).
