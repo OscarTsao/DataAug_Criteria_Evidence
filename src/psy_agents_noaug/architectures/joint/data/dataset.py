@@ -1,22 +1,28 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from psy_agents_noaug.architectures.utils import build_criterion_text_map, resolve_criterion_text
+from psy_agents_noaug.architectures.utils import (
+    build_criterion_text_map,
+    resolve_criterion_text,
+)
 from psy_agents_noaug.architectures.utils.dsm_criteria import DEFAULT_DSM_CRITERIA_PATH
 
 DEFAULT_DATASET_PATH = (
-    Path(__file__).resolve().parents[5] / "data" / "processed" / "redsm5_matched_evidence.csv"
+    Path(__file__).resolve().parents[5]
+    / "data"
+    / "processed"
+    / "redsm5_matched_evidence.csv"
 )
 
 
-def _find_answer_span(context: str, answer: str) -> Tuple[int, int]:
+def _find_answer_span(context: str, answer: str) -> tuple[int, int]:
     answer = answer.strip()
     start_idx = context.find(answer)
     if start_idx == -1:
@@ -35,9 +41,9 @@ def _token_span_from_char(
     offsets: torch.Tensor,
     start_char: int,
     end_char: int,
-    sequence_ids: Optional[Sequence[Optional[int]]] = None,
+    sequence_ids: Sequence[int | None] | None = None,
     target_sequence_id: int = 0,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     start_token = None
     end_token = None
     offsets_list = offsets.tolist()
@@ -63,9 +69,9 @@ class JointDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        criteria_tokenizer: Optional[PreTrainedTokenizerBase] = None,
-        evidence_tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        criteria_tokenizer: PreTrainedTokenizerBase | None = None,
+        evidence_tokenizer: PreTrainedTokenizerBase | None = None,
         criteria_tokenizer_name: str = "bert-base-uncased",
         evidence_tokenizer_name: str = "bert-base-uncased",
         sentence_column: str = "sentence_text",
@@ -75,8 +81,8 @@ class JointDataset(Dataset):
         evidence_max_length: int = 512,
         padding: str = "max_length",
         truncation: bool = True,
-        criterion_column: Optional[str] = None,
-        dsm_criteria_path: Optional[Union[Path, str]] = None,
+        criterion_column: str | None = None,
+        dsm_criteria_path: Path | str | None = None,
     ) -> None:
         super().__init__()
         self.csv_path = Path(csv_path or DEFAULT_DATASET_PATH)
@@ -86,8 +92,10 @@ class JointDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -99,13 +107,15 @@ class JointDataset(Dataset):
         self.evidence_max_length = evidence_max_length
         self.padding = padding
         self.truncation = truncation
-        self.criterion_columns: List[str] = []
+        self.criterion_columns: list[str] = []
         if criterion_column:
             self.criterion_columns.append(criterion_column)
         self.criterion_columns.extend(["criterion_id", "DSM5_symptom"])
-        seen: Dict[str, None] = {}
+        seen: dict[str, None] = {}
         self.criterion_columns = [
-            column for column in self.criterion_columns if not (column in seen or seen.setdefault(column, None))
+            column
+            for column in self.criterion_columns
+            if not (column in seen or seen.setdefault(column, None))
         ]
 
         missing_columns = [
@@ -134,20 +144,24 @@ class JointDataset(Dataset):
         self.criteria_tokenizer = criteria_tokenizer or AutoTokenizer.from_pretrained(
             criteria_tokenizer_name
         )
-        if evidence_tokenizer is None and criteria_tokenizer_name == evidence_tokenizer_name:
+        if (
+            evidence_tokenizer is None
+            and criteria_tokenizer_name == evidence_tokenizer_name
+        ):
             # Reuse tokenizer instance when weights are expected to be shared.
             self.evidence_tokenizer = self.criteria_tokenizer
         else:
-            self.evidence_tokenizer = evidence_tokenizer or AutoTokenizer.from_pretrained(
-                evidence_tokenizer_name
+            self.evidence_tokenizer = (
+                evidence_tokenizer
+                or AutoTokenizer.from_pretrained(evidence_tokenizer_name)
             )
 
     @staticmethod
-    def _format_identifier(identifier: Union[str, int]) -> str:
+    def _format_identifier(identifier: str | int) -> str:
         text = str(identifier).replace("_", " ").replace("-", " ").strip()
         return text if text else str(identifier)
 
-    def _get_criterion_text(self, example: Dict[str, str]) -> str:
+    def _get_criterion_text(self, example: dict[str, str]) -> str:
         if self.has_direct_text_column:
             raw_text = str(example.get("criterion_text", "")).strip()
             if raw_text:
@@ -171,7 +185,7 @@ class JointDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
         sentence = example[self.sentence_column]
         context = example[self.context_column]
@@ -208,7 +222,7 @@ class JointDataset(Dataset):
             target_sequence_id=0,
         )
 
-        item: Dict[str, torch.Tensor] = {}
+        item: dict[str, torch.Tensor] = {}
 
         for key, value in criteria_encoded.items():
             item[f"criteria_{key}"] = value.squeeze(0)
@@ -223,9 +237,9 @@ class JointDataset(Dataset):
 
 
 def load_joint_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[JointDataset, Tuple[Dataset, ...]]:
+) -> JointDataset | tuple[Dataset, ...]:
     dataset: JointDataset = JointDataset(**dataset_kwargs)
     if not splits:
         return dataset

@@ -1,9 +1,7 @@
 """Pytest configuration and shared fixtures."""
 
 import os
-import tempfile
-from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -23,21 +21,23 @@ def test_data_dir(tmp_path_factory):
 def mock_mlflow():
     """Mock MLflow for testing without logging."""
     import mlflow
-    
+
     # Store original functions
     original_start_run = mlflow.start_run
     original_log_param = mlflow.log_param
     original_log_metric = mlflow.log_metric
     original_log_artifact = mlflow.log_artifact
-    
+
     # Create mocks
-    mlflow.start_run = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
+    mlflow.start_run = MagicMock(
+        return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock())
+    )
     mlflow.log_param = MagicMock()
     mlflow.log_metric = MagicMock()
     mlflow.log_artifact = MagicMock()
-    
+
     yield mlflow
-    
+
     # Restore original functions
     mlflow.start_run = original_start_run
     mlflow.log_param = original_log_param
@@ -46,7 +46,7 @@ def mock_mlflow():
 
 
 @pytest.fixture
-def sample_config() -> Dict[str, Any]:
+def sample_config() -> dict[str, Any]:
     """Create a sample configuration for testing."""
     return {
         "task": {
@@ -78,34 +78,45 @@ def sample_config() -> Dict[str, Any]:
 @pytest.fixture
 def sample_posts() -> pd.DataFrame:
     """Create sample posts DataFrame."""
-    return pd.DataFrame({
-        "post_id": ["post1", "post2", "post3", "post4", "post5"],
-        "text": [
-            "Patient reports anxiety symptoms.",
-            "No significant psychiatric history.",
-            "Depression and mood disturbances noted.",
-            "Patient appears stable.",
-            "Severe anxiety and panic attacks.",
-        ],
-    })
+    return pd.DataFrame(
+        {
+            "post_id": ["post1", "post2", "post3", "post4", "post5"],
+            "text": [
+                "Patient reports anxiety symptoms.",
+                "No significant psychiatric history.",
+                "Depression and mood disturbances noted.",
+                "Patient appears stable.",
+                "Severe anxiety and panic attacks.",
+            ],
+        }
+    )
 
 
 @pytest.fixture
 def sample_annotations() -> pd.DataFrame:
     """Create sample annotations DataFrame."""
-    return pd.DataFrame({
-        "post_id": ["post1", "post1", "post2", "post3", "post4", "post5"],
-        "criterion_id": ["A", "B", "A", "C", "A", "B"],
-        "status": ["positive", "negative", "negative", "positive", "negative", "positive"],
-        "cases": [
-            '[{"text": "anxiety symptoms", "start_char": 15, "end_char": 31}]',
-            "[]",
-            "[]",
-            '[{"text": "Depression", "start_char": 0, "end_char": 10}]',
-            "[]",
-            '[{"text": "panic attacks", "start_char": 20, "end_char": 33}]',
-        ],
-    })
+    return pd.DataFrame(
+        {
+            "post_id": ["post1", "post1", "post2", "post3", "post4", "post5"],
+            "criterion_id": ["A", "B", "A", "C", "A", "B"],
+            "status": [
+                "positive",
+                "negative",
+                "negative",
+                "positive",
+                "negative",
+                "positive",
+            ],
+            "cases": [
+                '[{"text": "anxiety symptoms", "start_char": 15, "end_char": 31}]',
+                "[]",
+                "[]",
+                '[{"text": "Depression", "start_char": 0, "end_char": 10}]',
+                "[]",
+                '[{"text": "panic attacks", "start_char": 20, "end_char": 33}]',
+            ],
+        }
+    )
 
 
 @pytest.fixture
@@ -192,8 +203,9 @@ def field_map_path(tmp_path):
 def reset_random_seeds():
     """Reset random seeds before each test."""
     import random
+
     import numpy as np
-    
+
     random.seed(42)
     np.random.seed(42)
     torch.manual_seed(42)
@@ -206,11 +218,13 @@ def mock_dataset():
     """Create a mock dataset."""
     dataset = MagicMock()
     dataset.__len__ = MagicMock(return_value=10)
-    dataset.__getitem__ = MagicMock(return_value={
-        "input_ids": torch.tensor([1, 2, 3, 4, 5]),
-        "attention_mask": torch.tensor([1, 1, 1, 1, 1]),
-        "labels": torch.tensor(1),
-    })
+    dataset.__getitem__ = MagicMock(
+        return_value={
+            "input_ids": torch.tensor([1, 2, 3, 4, 5]),
+            "attention_mask": torch.tensor([1, 1, 1, 1, 1]),
+            "labels": torch.tensor(1),
+        }
+    )
     return dataset
 
 
@@ -219,19 +233,19 @@ def clean_environment():
     """Clean environment variables before and after tests."""
     # Store original values
     original_env = dict(os.environ)
-    
+
     # Clear MLflow and Optuna related env vars
     test_vars = [
         "MLFLOW_TRACKING_URI",
         "MLFLOW_EXPERIMENT_NAME",
         "OPTUNA_STORAGE",
     ]
-    
+
     for var in test_vars:
         os.environ.pop(var, None)
-    
+
     yield
-    
+
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)

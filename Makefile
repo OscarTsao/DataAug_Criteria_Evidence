@@ -3,6 +3,7 @@
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
+.PHONY: tune-criteria-max tune-evidence-max tune-share-max tune-joint-max
 
 # Default target
 .DEFAULT_GOAL := help
@@ -308,3 +309,19 @@ info:
 	@test -f poetry.lock && echo "  Poetry: ✓ Dependencies locked" || echo "  Poetry: ✗ No lock file"
 	@test -d data/processed && echo "  Data: ✓ Processed data exists" || echo "  Data: ✗ Run 'make groundtruth'"
 	@test -d mlruns && echo "  MLflow: ✓ Runs directory exists" || echo "  MLflow: ✗ No runs yet"
+
+tune-criteria-max:
+	@HPO_EPOCHS?=6; \
+	python scripts/tune_max.py --agent criteria --study noaug-criteria-max --n-trials 800 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+tune-evidence-max:
+	@HPO_EPOCHS?=6; \
+	python scripts/tune_max.py --agent evidence --study noaug-evidence-max --n-trials 1200 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+tune-share-max:
+	@HPO_EPOCHS?=6; \
+	python scripts/tune_max.py --agent share --study noaug-share-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+tune-joint-max:
+	@HPO_EPOCHS?=6; \
+	python scripts/tune_max.py --agent joint --study noaug-joint-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}

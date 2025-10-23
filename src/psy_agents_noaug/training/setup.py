@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import List
 
 import torch
 from torch.optim import Optimizer
@@ -17,10 +16,10 @@ from transformers import (
 def _get_parameter_groups(
     model: torch.nn.Module,
     weight_decay: float,
-) -> List[dict]:
+) -> list[dict]:
     """Create parameter groups with and without weight decay."""
-    decay_params: List[torch.nn.Parameter] = []
-    no_decay_params: List[torch.nn.Parameter] = []
+    decay_params: list[torch.nn.Parameter] = []
+    no_decay_params: list[torch.nn.Parameter] = []
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
@@ -32,12 +31,16 @@ def _get_parameter_groups(
         else:
             decay_params.append(param)
 
-    groups: List[dict] = []
+    groups: list[dict] = []
     if decay_params:
         groups.append({"params": decay_params, "weight_decay": weight_decay})
     if no_decay_params:
         groups.append({"params": no_decay_params, "weight_decay": 0.0})
-    return groups if groups else [{"params": model.parameters(), "weight_decay": weight_decay}]
+    return (
+        groups
+        if groups
+        else [{"params": model.parameters(), "weight_decay": weight_decay}]
+    )
 
 
 def create_optimizer(

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
@@ -18,8 +18,8 @@ class CriteriaDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
         tokenizer_name: str = "bert-base-uncased",
         text_column: str = "sentence_text",
         label_column: str = "status",
@@ -35,8 +35,10 @@ class CriteriaDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -65,7 +67,7 @@ class CriteriaDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
         text = example[self.text_column]
         label = int(example[self.label_column])
@@ -78,7 +80,7 @@ class CriteriaDataset(Dataset):
             return_tensors="pt",
         )
 
-        item: Dict[str, torch.Tensor] = {
+        item: dict[str, torch.Tensor] = {
             key: value.squeeze(0) for key, value in encoded.items()
         }
         item["labels"] = torch.tensor(label, dtype=torch.long)
@@ -86,9 +88,9 @@ class CriteriaDataset(Dataset):
 
 
 def load_criteria_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[CriteriaDataset, Tuple[Dataset, ...]]:
+) -> CriteriaDataset | tuple[Dataset, ...]:
     """Utility to construct CriteriaDataset objects, optionally split into subsets.
 
     Args:

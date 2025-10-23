@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from psy_agents_noaug.architectures.utils import build_criterion_text_map, resolve_criterion_text
+from psy_agents_noaug.architectures.utils import (
+    build_criterion_text_map,
+    resolve_criterion_text,
+)
 from psy_agents_noaug.architectures.utils.dsm_criteria import DEFAULT_DSM_CRITERIA_PATH
 
 DEFAULT_DATASET_PATH = (
@@ -21,16 +24,16 @@ class CriteriaDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
         tokenizer_name: str = "bert-base-uncased",
         text_column: str = "sentence_text",
         label_column: str = "status",
-        criterion_column: Optional[str] = None,
+        criterion_column: str | None = None,
         max_length: int = 256,
         padding: str = "max_length",
         truncation: bool = True,
-        dsm_criteria_path: Optional[Union[Path, str]] = None,
+        dsm_criteria_path: Path | str | None = None,
     ) -> None:
         super().__init__()
         self.csv_path = Path(csv_path or DEFAULT_DATASET_PATH)
@@ -40,8 +43,10 @@ class CriteriaDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -51,14 +56,16 @@ class CriteriaDataset(Dataset):
         self.max_length = max_length
         self.padding = padding
         self.truncation = truncation
-        self.criterion_columns: List[str] = []
+        self.criterion_columns: list[str] = []
         if criterion_column:
             self.criterion_columns.append(criterion_column)
         self.criterion_columns.extend(["criterion_id", "DSM5_symptom"])
         # Preserve order but drop duplicates
-        seen: Dict[str, None] = {}
+        seen: dict[str, None] = {}
         self.criterion_columns = [
-            column for column in self.criterion_columns if not (column in seen or seen.setdefault(column, None))
+            column
+            for column in self.criterion_columns
+            if not (column in seen or seen.setdefault(column, None))
         ]
 
         missing_columns = [
@@ -89,11 +96,11 @@ class CriteriaDataset(Dataset):
             )
 
     @staticmethod
-    def _format_identifier(identifier: Union[str, int]) -> str:
+    def _format_identifier(identifier: str | int) -> str:
         text = str(identifier).replace("_", " ").replace("-", " ").strip()
         return text if text else str(identifier)
 
-    def _get_criterion_text(self, example: Dict[str, str]) -> str:
+    def _get_criterion_text(self, example: dict[str, str]) -> str:
         if self.has_direct_text_column:
             raw_text = str(example.get("criterion_text", "")).strip()
             if raw_text:
@@ -117,7 +124,7 @@ class CriteriaDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
         text = example[self.text_column]
         label = int(example[self.label_column])
@@ -132,7 +139,7 @@ class CriteriaDataset(Dataset):
             return_tensors="pt",
         )
 
-        item: Dict[str, torch.Tensor] = {
+        item: dict[str, torch.Tensor] = {
             key: value.squeeze(0) for key, value in encoded.items()
         }
         item["labels"] = torch.tensor(label, dtype=torch.long)
@@ -140,9 +147,9 @@ class CriteriaDataset(Dataset):
 
 
 def load_criteria_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[CriteriaDataset, Tuple[Dataset, ...]]:
+) -> CriteriaDataset | tuple[Dataset, ...]:
     """Utility to construct CriteriaDataset objects, optionally split into subsets.
 
     Args:

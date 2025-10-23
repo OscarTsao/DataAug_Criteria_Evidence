@@ -1,6 +1,6 @@
 """Transformer encoder models for text encoding."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -8,6 +8,7 @@ from transformers import AutoModel, AutoTokenizer
 
 try:  # Optional dependency for LoRA
     from peft import LoraConfig, TaskType, get_peft_model
+
     PEFT_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional feature
     PEFT_AVAILABLE = False
@@ -16,13 +17,13 @@ except ImportError:  # pragma: no cover - optional feature
 class TransformerEncoder(nn.Module):
     """
     Base transformer encoder using HuggingFace models.
-    
+
     Supports:
     - BERT, RoBERTa, DeBERTa variants
     - Frozen or fine-tunable encoders
     - CLS token pooling or mean pooling
     """
-    
+
     def __init__(
         self,
         model_name: str = "bert-base-uncased",
@@ -30,11 +31,11 @@ class TransformerEncoder(nn.Module):
         pooling_strategy: str = "cls",
         max_length: int = 512,
         gradient_checkpointing: bool = False,
-        lora_config: Optional[Dict[str, Any]] = None,
+        lora_config: dict[str, Any] | None = None,
     ):
         """
         Initialize encoder.
-        
+
         Args:
             model_name: HuggingFace model name
             freeze_encoder: Whether to freeze encoder weights
@@ -42,11 +43,11 @@ class TransformerEncoder(nn.Module):
             max_length: Maximum sequence length
         """
         super().__init__()
-        
+
         self.model_name = model_name
         self.pooling_strategy = pooling_strategy
         self.max_length = max_length
-        
+
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         self.encoder = AutoModel.from_pretrained(model_name)
@@ -57,7 +58,9 @@ class TransformerEncoder(nn.Module):
                 param.requires_grad = False
 
         # Enable gradient checkpointing for memory efficiency
-        if gradient_checkpointing and hasattr(self.encoder, "gradient_checkpointing_enable"):
+        if gradient_checkpointing and hasattr(
+            self.encoder, "gradient_checkpointing_enable"
+        ):
             self.encoder.gradient_checkpointing_enable()
 
         # Apply optional LoRA adapters
@@ -80,7 +83,7 @@ class TransformerEncoder(nn.Module):
 
         # Get hidden size
         self.hidden_size = self.encoder.config.hidden_size
-    
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -88,11 +91,11 @@ class TransformerEncoder(nn.Module):
     ) -> torch.Tensor:
         """
         Encode input text.
-        
+
         Args:
             input_ids: Token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
-            
+
         Returns:
             Encoded representations [batch_size, hidden_size]
         """
@@ -101,7 +104,7 @@ class TransformerEncoder(nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
-        
+
         # Apply pooling
         if self.pooling_strategy == "cls":
             # Use CLS token representation
@@ -120,21 +123,21 @@ class TransformerEncoder(nn.Module):
                 f"Unknown pooling strategy: {self.pooling_strategy}. "
                 "Must be 'cls' or 'mean'"
             )
-        
+
         return pooled
-    
+
     def encode_texts(
         self,
         texts: list[str],
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         """
         Encode a batch of texts.
-        
+
         Args:
             texts: List of input texts
             device: Target device
-            
+
         Returns:
             Encoded representations [batch_size, hidden_size]
         """
@@ -146,23 +149,23 @@ class TransformerEncoder(nn.Module):
             max_length=self.max_length,
             return_tensors="pt",
         )
-        
+
         if device:
             encoded = {k: v.to(device) for k, v in encoded.items()}
-        
+
         # Encode
         with torch.no_grad():
             embeddings = self.forward(
                 input_ids=encoded["input_ids"],
                 attention_mask=encoded["attention_mask"],
             )
-        
+
         return embeddings
 
 
 class BERTEncoder(TransformerEncoder):
     """BERT-specific encoder."""
-    
+
     def __init__(
         self,
         variant: str = "base",
@@ -170,11 +173,11 @@ class BERTEncoder(TransformerEncoder):
         pooling_strategy: str = "cls",
         max_length: int = 512,
         gradient_checkpointing: bool = False,
-        lora_config: Optional[Dict[str, Any]] = None,
+        lora_config: dict[str, Any] | None = None,
     ):
         """
         Initialize BERT encoder.
-        
+
         Args:
             variant: BERT variant ('base', 'large')
             freeze_encoder: Whether to freeze encoder weights
@@ -194,7 +197,7 @@ class BERTEncoder(TransformerEncoder):
 
 class RoBERTaEncoder(TransformerEncoder):
     """RoBERTa-specific encoder."""
-    
+
     def __init__(
         self,
         variant: str = "base",
@@ -202,11 +205,11 @@ class RoBERTaEncoder(TransformerEncoder):
         pooling_strategy: str = "cls",
         max_length: int = 512,
         gradient_checkpointing: bool = False,
-        lora_config: Optional[Dict[str, Any]] = None,
+        lora_config: dict[str, Any] | None = None,
     ):
         """
         Initialize RoBERTa encoder.
-        
+
         Args:
             variant: RoBERTa variant ('base', 'large')
             freeze_encoder: Whether to freeze encoder weights
@@ -226,7 +229,7 @@ class RoBERTaEncoder(TransformerEncoder):
 
 class DeBERTaEncoder(TransformerEncoder):
     """DeBERTa-v3-specific encoder."""
-    
+
     def __init__(
         self,
         variant: str = "base",
@@ -234,11 +237,11 @@ class DeBERTaEncoder(TransformerEncoder):
         pooling_strategy: str = "cls",
         max_length: int = 512,
         gradient_checkpointing: bool = False,
-        lora_config: Optional[Dict[str, Any]] = None,
+        lora_config: dict[str, Any] | None = None,
     ):
         """
         Initialize DeBERTa encoder.
-        
+
         Args:
             variant: DeBERTa variant ('base', 'large')
             freeze_encoder: Whether to freeze encoder weights

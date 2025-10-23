@@ -60,7 +60,9 @@ def set_seed(seed: int, deterministic: bool = True, cudnn_benchmark: bool = Fals
             if deterministic:
                 try:
                     torch.use_deterministic_algorithms(deterministic, warn_only=True)
-                    print(f"Warning: Some operations may still be non-deterministic: {e}")
+                    print(
+                        f"Warning: Some operations may still be non-deterministic: {e}"
+                    )
                 except Exception:
                     pass
 
@@ -86,15 +88,21 @@ def get_device(prefer_cuda: bool = True, device_id: int = 0) -> torch.device:
         device = torch.device(f"cuda:{device_id}")
         print(f"Using CUDA device {device_id}: {torch.cuda.get_device_name(device_id)}")
         print(f"CUDA version: {torch.version.cuda}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(device_id).total_memory / 1e9:.2f} GB")
+        print(
+            f"GPU Memory: {torch.cuda.get_device_properties(device_id).total_memory / 1e9:.2f} GB"
+        )
 
         # Check for TF32 support (Ampere and later)
         compute_capability = torch.cuda.get_device_capability(device_id)
         if compute_capability[0] >= 8:  # Ampere (80) and later
-            print(f"Compute Capability: {compute_capability[0]}.{compute_capability[1]} (Ampere+)")
+            print(
+                f"Compute Capability: {compute_capability[0]}.{compute_capability[1]} (Ampere+)"
+            )
             print("TF32 and BFloat16 are supported on this GPU")
         else:
-            print(f"Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
+            print(
+                f"Compute Capability: {compute_capability[0]}.{compute_capability[1]}"
+            )
     else:
         device = torch.device("cpu")
         print("Using CPU device")
@@ -162,7 +170,7 @@ def get_optimal_dataloader_kwargs(
     print(f"  num_workers: {kwargs.get('num_workers', 0)}")
     print(f"  pin_memory: {kwargs.get('pin_memory', False)}")
     print(f"  persistent_workers: {kwargs.get('persistent_workers', False)}")
-    if 'prefetch_factor' in kwargs:
+    if "prefetch_factor" in kwargs:
         print(f"  prefetch_factor: {kwargs['prefetch_factor']}")
 
     return kwargs

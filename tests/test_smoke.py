@@ -6,7 +6,6 @@ Quick tests that verify:
 - System is functional
 """
 
-import pytest
 import torch
 
 
@@ -16,11 +15,13 @@ class TestImports:
     def test_import_main_package(self):
         """Test main package import."""
         import psy_agents_noaug
+
         assert psy_agents_noaug is not None
 
     def test_import_data_modules(self):
         """Test data module imports."""
         from psy_agents_noaug.data import datasets, groundtruth, loaders
+
         assert datasets is not None
         assert groundtruth is not None
         assert loaders is not None
@@ -28,17 +29,20 @@ class TestImports:
     def test_import_model_modules(self):
         """Test model module imports."""
         from psy_agents_noaug.models import encoders
+
         assert encoders is not None
 
     def test_import_training_modules(self):
         """Test training module imports."""
         from psy_agents_noaug.training import evaluate, train_loop
+
         assert evaluate is not None
         assert train_loop is not None
 
     def test_import_utils_modules(self):
         """Test utils module imports."""
         from psy_agents_noaug.utils import logging, reproducibility
+
         assert logging is not None
         assert reproducibility is not None
 
@@ -174,16 +178,19 @@ class TestEnvironment:
     def test_pytorch_available(self):
         """Test PyTorch is available."""
         import torch
+
         assert torch.__version__ is not None
 
     def test_transformers_available(self):
         """Test transformers is available."""
         import transformers
+
         assert transformers.__version__ is not None
 
     def test_cuda_info(self):
         """Test CUDA availability (info only)."""
         import torch
+
         # Just log CUDA availability, don't assert
         cuda_available = torch.cuda.is_available()
         if cuda_available:

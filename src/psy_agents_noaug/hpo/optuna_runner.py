@@ -1,21 +1,22 @@
 """Comprehensive Optuna-based hyperparameter optimization."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 import mlflow
 import optuna
+from omegaconf import DictConfig, OmegaConf
 from optuna.integration.mlflow import MLflowCallback
 from optuna.pruners import HyperbandPruner, MedianPruner
 from optuna.samplers import TPESampler
-from omegaconf import DictConfig, OmegaConf
 
 
 class OptunaRunner:
     """
     Unified Optuna HPO runner with multi-stage support.
-    
+
     Features:
     - TPE sampler with multivariate optimization
     - MedianPruner and HyperbandPruner support
@@ -23,19 +24,19 @@ class OptunaRunner:
     - Study persistence
     - Unified search space across all stages
     """
-    
+
     def __init__(
         self,
         study_name: str,
         direction: str = "maximize",
         metric: str = "val_f1_macro",
-        storage: Optional[str] = None,
-        sampler_config: Optional[Dict[str, Any]] = None,
-        pruner_config: Optional[Dict[str, Any]] = None,
+        storage: str | None = None,
+        sampler_config: dict[str, Any] | None = None,
+        pruner_config: dict[str, Any] | None = None,
     ):
         """
         Initialize OptunaRunner.
-        
+
         Args:
             study_name: Name of the Optuna study
             direction: Optimization direction ('minimize' or 'maximize')
@@ -47,13 +48,13 @@ class OptunaRunner:
         self.study_name = study_name
         self.direction = direction
         self.metric = metric
-        
+
         # Create sampler
         sampler = self._create_sampler(sampler_config)
-        
+
         # Create pruner
         pruner = self._create_pruner(pruner_config)
-        
+
         # Create or load study
         self.study = optuna.create_study(
             study_name=study_name,
@@ -63,17 +64,16 @@ class OptunaRunner:
             sampler=sampler,
             pruner=pruner,
         )
-    
+
     def _create_sampler(
-        self,
-        config: Optional[Dict[str, Any]]
+        self, config: dict[str, Any] | None
     ) -> optuna.samplers.BaseSampler:
         """Create Optuna sampler from configuration."""
         if config is None:
             return TPESampler()
-        
+
         sampler_type = config.get("type", "tpe")
-        
+
         if sampler_type == "tpe":
             return TPESampler(
                 n_startup_trials=config.get("n_startup_trials", 10),
@@ -84,17 +84,16 @@ class OptunaRunner:
             return optuna.samplers.RandomSampler()
         else:
             raise ValueError(f"Unknown sampler type: {sampler_type}")
-    
+
     def _create_pruner(
-        self,
-        config: Optional[Dict[str, Any]]
-    ) -> Optional[optuna.pruners.BasePruner]:
+        self, config: dict[str, Any] | None
+    ) -> optuna.pruners.BasePruner | None:
         """Create Optuna pruner from configuration."""
         if config is None:
             return None
-        
+
         pruner_type = config.get("type")
-        
+
         if pruner_type == "median":
             return MedianPruner(
                 n_startup_trials=config.get("n_startup_trials", 5),
@@ -111,34 +110,34 @@ class OptunaRunner:
             return None
         else:
             raise ValueError(f"Unknown pruner type: {pruner_type}")
-    
+
     def suggest_hyperparameters(
         self,
         trial: optuna.Trial,
-        search_space: Dict[str, Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        search_space: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         """
         Suggest hyperparameters from unified search space.
-        
+
         Supports all stages with flexible parameter definitions.
-        
+
         Args:
             trial: Optuna trial
             search_space: Search space configuration
-            
+
         Returns:
             Dictionary of suggested hyperparameters
         """
         params = {}
-        
+
         for param_name, param_config in search_space.items():
             param_type = param_config["type"]
-            
+
             if param_type == "categorical":
                 params[param_name] = trial.suggest_categorical(
                     param_name, param_config["choices"]
                 )
-            
+
             elif param_type == "int":
                 params[param_name] = trial.suggest_int(
                     param_name,
@@ -146,7 +145,7 @@ class OptunaRunner:
                     param_config["high"],
                     log=param_config.get("log", False),
                 )
-            
+
             elif param_type == "float":
                 params[param_name] = trial.suggest_float(
                     param_name,
@@ -154,7 +153,7 @@ class OptunaRunner:
                     param_config["high"],
                     log=param_config.get("log", False),
                 )
-            
+
             elif param_type == "uniform":
                 params[param_name] = trial.suggest_float(
                     param_name,
@@ -162,7 +161,7 @@ class OptunaRunner:
                     param_config["high"],
                     log=False,
                 )
-            
+
             elif param_type == "loguniform":
                 params[param_name] = trial.suggest_float(
                     param_name,
@@ -170,23 +169,23 @@ class OptunaRunner:
                     param_config["high"],
                     log=True,
                 )
-            
+
             else:
                 raise ValueError(f"Unknown parameter type: {param_type}")
-        
+
         return params
-    
+
     def optimize(
         self,
         objective_fn: Callable,
         n_trials: int,
-        search_space: Dict[str, Dict[str, Any]],
-        mlflow_tracking_uri: Optional[str] = None,
-        timeout: Optional[float] = None,
+        search_space: dict[str, dict[str, Any]],
+        mlflow_tracking_uri: str | None = None,
+        timeout: float | None = None,
     ):
         """
         Run hyperparameter optimization.
-        
+
         Args:
             objective_fn: Objective function to optimize
             n_trials: Number of trials to run
@@ -203,15 +202,15 @@ class OptunaRunner:
                 metric_name=self.metric,
             )
             callbacks.append(mlflow_callback)
-        
+
         # Create wrapped objective
         def wrapped_objective(trial):
             # Suggest hyperparameters
             params = self.suggest_hyperparameters(trial, search_space)
-            
+
             # Call user objective function
             return objective_fn(trial, params)
-        
+
         # Run optimization
         self.study.optimize(
             wrapped_objective,
@@ -220,23 +219,23 @@ class OptunaRunner:
             callbacks=callbacks if callbacks else None,
             show_progress_bar=True,
         )
-    
-    def get_best_params(self) -> Dict[str, Any]:
+
+    def get_best_params(self) -> dict[str, Any]:
         """Get best hyperparameters from study."""
         return self.study.best_params
-    
+
     def get_best_value(self) -> float:
         """Get best objective value from study."""
         return self.study.best_value
-    
+
     def get_best_trial(self) -> optuna.trial.FrozenTrial:
         """Get best trial from study."""
         return self.study.best_trial
-    
+
     def print_best_trial(self):
         """Print information about best trial."""
         best_trial = self.study.best_trial
-        
+
         print("\n" + "=" * 70)
         print("Best Trial Information".center(70))
         print("=" * 70)
@@ -246,52 +245,53 @@ class OptunaRunner:
         for key, value in best_trial.params.items():
             print(f"    {key}: {value}")
         print("=" * 70 + "\n")
-    
+
     def save_study(self, output_path: Path):
         """
         Save study to file.
-        
+
         Args:
             output_path: Path to save study
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Save using joblib
         import joblib
+
         joblib.dump(self.study, output_path)
         print(f"Study saved to {output_path}")
-    
+
     def export_best_config(self, output_path: Path):
         """
         Export best configuration as YAML.
-        
+
         Args:
             output_path: Path to save configuration
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         best_params = self.get_best_params()
-        
+
         # Convert to OmegaConf for pretty YAML
         config = OmegaConf.create(best_params)
-        
+
         with open(output_path, "w") as f:
             OmegaConf.save(config, f)
-        
+
         print(f"Best configuration exported to {output_path}")
-    
+
     def export_trials_history(self, output_path: Path):
         """
         Export trials history as JSON.
-        
+
         Args:
             output_path: Path to save trials history
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         trials_data = []
         for trial in self.study.trials:
             trial_dict = {
@@ -299,53 +299,57 @@ class OptunaRunner:
                 "value": trial.value,
                 "params": trial.params,
                 "state": trial.state.name,
-                "datetime_start": trial.datetime_start.isoformat() if trial.datetime_start else None,
-                "datetime_complete": trial.datetime_complete.isoformat() if trial.datetime_complete else None,
+                "datetime_start": (
+                    trial.datetime_start.isoformat() if trial.datetime_start else None
+                ),
+                "datetime_complete": (
+                    trial.datetime_complete.isoformat()
+                    if trial.datetime_complete
+                    else None
+                ),
             }
             trials_data.append(trial_dict)
-        
+
         with open(output_path, "w") as f:
             json.dump(trials_data, f, indent=2)
-        
+
         print(f"Trials history exported to {output_path}")
-    
+
     @staticmethod
     def load_study(study_path: Path) -> "OptunaRunner":
         """
         Load study from file.
-        
+
         Args:
             study_path: Path to saved study
-            
+
         Returns:
             OptunaRunner instance with loaded study
         """
         import joblib
+
         study = joblib.load(study_path)
-        
+
         runner = OptunaRunner(
-            study_name=study.study_name,
-            direction=study.direction.name.lower()
+            study_name=study.study_name, direction=study.direction.name.lower()
         )
         runner.study = study
-        
+
         return runner
 
 
-def create_search_space_from_config(
-    config: DictConfig
-) -> Dict[str, Dict[str, Any]]:
+def create_search_space_from_config(config: DictConfig) -> dict[str, dict[str, Any]]:
     """
     Create Optuna search space from Hydra config.
-    
+
     Args:
         config: Hydra configuration with search_space section
-        
+
     Returns:
         Optuna search space dictionary
     """
     if not hasattr(config, "search_space"):
         return {}
-    
+
     search_space = OmegaConf.to_container(config.search_space, resolve=True)
     return search_space

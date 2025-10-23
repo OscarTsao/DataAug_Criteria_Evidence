@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 DEFAULT_DATASET_PATH = (
-    Path(__file__).resolve().parents[4] / "data" / "processed" / "redsm5_matched_evidence.csv"
+    Path(__file__).resolve().parents[4]
+    / "data"
+    / "processed"
+    / "redsm5_matched_evidence.csv"
 )
 
 
-def _find_answer_span(context: str, answer: str) -> Tuple[int, int]:
+def _find_answer_span(context: str, answer: str) -> tuple[int, int]:
     """Locate the answer span within the context and return character indices."""
     answer = answer.strip()
     start_idx = context.find(answer)
@@ -35,7 +38,7 @@ def _token_span_from_char(
     offsets: torch.Tensor,
     start_char: int,
     end_char: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     start_token = None
     end_token = None
     for idx, (token_start, token_end) in enumerate(offsets.tolist()):
@@ -56,8 +59,8 @@ class EvidenceDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
         tokenizer_name: str = "bert-base-uncased",
         context_column: str = "post_text",
         answer_column: str = "sentence_text",
@@ -73,8 +76,10 @@ class EvidenceDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -101,7 +106,7 @@ class EvidenceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
 
         context = example[self.context_column]
@@ -121,7 +126,7 @@ class EvidenceDataset(Dataset):
         offsets = encoded.pop("offset_mapping").squeeze(0)
         start_token, end_token = _token_span_from_char(offsets, start_char, end_char)
 
-        item: Dict[str, torch.Tensor] = {
+        item: dict[str, torch.Tensor] = {
             key: value.squeeze(0) for key, value in encoded.items()
         }
         item["start_positions"] = torch.tensor(start_token, dtype=torch.long)
@@ -130,9 +135,9 @@ class EvidenceDataset(Dataset):
 
 
 def load_evidence_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[EvidenceDataset, Tuple[Dataset, ...]]:
+) -> EvidenceDataset | tuple[Dataset, ...]:
     dataset: EvidenceDataset = EvidenceDataset(**dataset_kwargs)
     if not splits:
         return dataset

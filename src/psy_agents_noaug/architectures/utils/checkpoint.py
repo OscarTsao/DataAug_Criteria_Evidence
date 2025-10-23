@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -29,18 +29,18 @@ def save_best_model_state(
     project: str,
     model: nn.Module,
     *,
-    tokenizer: Optional[PreTrainedTokenizerBase] = None,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    epoch: Optional[int] = None,
+    tokenizer: PreTrainedTokenizerBase | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
+    epoch: int | None = None,
     metric_name: str = "metric",
-    metric_value: Optional[float] = None,
-    extra_state: Optional[Dict[str, Any]] = None,
+    metric_value: float | None = None,
+    extra_state: dict[str, Any] | None = None,
     filename: str = _DEFAULT_BEST_FILENAME,
 ) -> Path:
     """Persist the best-performing model checkpoint and optional metadata."""
     checkpoint_path = get_artifact_path(project, filename)
-    state: Dict[str, Any] = {
+    state: dict[str, Any] = {
         "model_state_dict": model.state_dict(),
         "epoch": epoch,
         "metric_name": metric_name,
@@ -69,17 +69,17 @@ def save_training_state(
     project: str,
     *,
     model: nn.Module,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
     epoch: int,
     global_step: int,
-    best_metric: Optional[float] = None,
-    best_metric_name: Optional[str] = None,
-    rng_state: Optional[Dict[str, Any]] = None,
+    best_metric: float | None = None,
+    best_metric_name: str | None = None,
+    rng_state: dict[str, Any] | None = None,
     filename: str = _DEFAULT_LAST_FILENAME,
 ) -> Path:
     """Save the latest training state for resuming interrupted runs."""
-    state: Dict[str, Any] = {
+    state: dict[str, Any] = {
         "epoch": epoch,
         "global_step": global_step,
         "model_state_dict": model.state_dict(),
@@ -104,10 +104,10 @@ def load_training_state(
     project: str,
     *,
     model: nn.Module,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
     filename: str = _DEFAULT_LAST_FILENAME,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Load a previously saved training state into the provided modules."""
     checkpoint_path = get_artifact_path(project, filename)
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -131,10 +131,10 @@ def load_best_model_state(
     project: str,
     model: nn.Module,
     *,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
     filename: str = _DEFAULT_BEST_FILENAME,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Load the best model checkpoint into the provided model/optimizers."""
     checkpoint_path = get_artifact_path(project, filename)
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -158,8 +158,8 @@ class BestModelSaver:
     filename: str = _DEFAULT_BEST_FILENAME
     metric_name: str = "metric"
     mode: str = "max"
-    best_metric: Optional[float] = field(default=None, init=False)
-    metadata: Dict[str, Any] = field(default_factory=dict, init=False)
+    best_metric: float | None = field(default=None, init=False)
+    metadata: dict[str, Any] = field(default_factory=dict, init=False)
 
     def _is_improvement(self, value: float) -> bool:
         if self.best_metric is None:
@@ -175,11 +175,11 @@ class BestModelSaver:
         *,
         metric_value: float,
         model: nn.Module,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[Any] = None,
-        epoch: Optional[int] = None,
-        extra_state: Optional[Dict[str, Any]] = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        scheduler: Any | None = None,
+        epoch: int | None = None,
+        extra_state: dict[str, Any] | None = None,
     ) -> bool:
         """Save the checkpoint if the provided metric improves the current best."""
         if not self._is_improvement(metric_value):
@@ -207,7 +207,7 @@ class BestModelSaver:
             self.metadata["extra_state"] = extra_state
         return True
 
-    def load_existing(self) -> Optional[Dict[str, Any]]:
+    def load_existing(self) -> dict[str, Any] | None:
         """Load metadata from disk if a best model checkpoint already exists."""
         path = get_artifact_path(self.project, self.filename)
         if not path.exists():

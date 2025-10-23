@@ -11,6 +11,8 @@ from .checkpoint import (
     training_state_exists,
 )
 from .dsm_criteria import build_criterion_text_map, resolve_criterion_text
+from .heads import ClassificationHead, SequencePooler, SpanPredictionHead
+from .outputs import BoolSafeTensor, make_bool_safe
 
 __all__ = [
     "BestModelSaver",
@@ -23,4 +25,9 @@ __all__ = [
     "training_state_exists",
     "build_criterion_text_map",
     "resolve_criterion_text",
+    "ClassificationHead",
+    "SequencePooler",
+    "SpanPredictionHead",
+    "BoolSafeTensor",
+    "make_bool_safe",
 ]

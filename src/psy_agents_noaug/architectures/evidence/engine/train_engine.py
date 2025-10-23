@@ -4,7 +4,7 @@ import math
 import time
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import optuna
@@ -30,7 +30,7 @@ from psy_agents_noaug.architectures.evidence.utils import (
 )
 
 
-def _flatten_dict(prefix: str, value: Any, accumulator: Dict[str, Any]) -> None:
+def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
@@ -41,14 +41,18 @@ def _flatten_dict(prefix: str, value: Any, accumulator: Dict[str, Any]) -> None:
 
 
 def _prepare_datasets(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     tokenizer: AutoTokenizer,
     seed: int,
-) -> Tuple[Dataset, Dataset, Optional[Dataset]]:
+) -> tuple[Dataset, Dataset, Dataset | None]:
     dataset_cfg = config.get("dataset", {})
     splits = dataset_cfg.get("splits", [0.8, 0.1, 0.1])
     if isinstance(splits, dict):
-        splits = [splits.get("train", 0.8), splits.get("val", 0.1), splits.get("test", 0.1)]
+        splits = [
+            splits.get("train", 0.8),
+            splits.get("val", 0.1),
+            splits.get("test", 0.1),
+        ]
     if len(splits) == 2:
         splits = [splits[0], splits[1], 0.0]
     if not math.isclose(sum(splits), 1.0, rel_tol=1e-3):
@@ -84,9 +88,9 @@ def _prepare_datasets(
 def _create_dataloaders(
     train_dataset: Dataset,
     val_dataset: Dataset,
-    test_dataset: Optional[Dataset],
-    config: Dict[str, Any],
-) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
+    test_dataset: Dataset | None,
+    config: dict[str, Any],
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     dataset_cfg = config.get("dataset", {})
     training_cfg = config.get("training", {})
 
@@ -119,7 +123,7 @@ def _create_dataloaders(
     return train_loader, val_loader, test_loader
 
 
-def _build_model(config: Dict[str, Any]) -> Model:
+def _build_model(config: dict[str, Any]) -> Model:
     model_cfg = config.get("model", {})
     return Model(
         model_name=model_cfg.get("pretrained_model", "bert-base-uncased"),
@@ -127,7 +131,7 @@ def _build_model(config: Dict[str, Any]) -> Model:
     )
 
 
-def _select_device(config: Dict[str, Any]) -> torch.device:
+def _select_device(config: dict[str, Any]) -> torch.device:
     preferred = config.get("training", {}).get("device")
     if preferred:
         return torch.device(preferred)
@@ -138,7 +142,9 @@ def _select_device(config: Dict[str, Any]) -> torch.device:
     return torch.device("cpu")
 
 
-def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.Optimizer:
+def _create_optimizer(
+    model: nn.Module, config: dict[str, Any]
+) -> torch.optim.Optimizer:
     training_cfg = config.get("training", {})
     optimizer_cfg = training_cfg.get("optimizer", {}) or {}
     optimizer_name = optimizer_cfg.get("name", "adamw").lower()
@@ -148,11 +154,19 @@ def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.O
 
     grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if p.requires_grad and not any(nd in n for nd in no_decay)
+            ],
             "weight_decay": weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if p.requires_grad and any(nd in n for nd in no_decay)
+            ],
             "weight_decay": 0.0,
         },
     ]
@@ -160,21 +174,34 @@ def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.O
     if optimizer_name == "adamw":
         return torch.optim.AdamW(grouped_parameters, lr=learning_rate)
     if optimizer_name == "adam":
-        return torch.optim.Adam(grouped_parameters, lr=learning_rate, weight_decay=weight_decay)
+        return torch.optim.Adam(
+            grouped_parameters, lr=learning_rate, weight_decay=weight_decay
+        )
     if optimizer_name == "sgd":
-        return torch.optim.SGD(grouped_parameters, lr=learning_rate, momentum=optimizer_cfg.get("momentum", 0.9), weight_decay=weight_decay)
+        return torch.optim.SGD(
+            grouped_parameters,
+            lr=learning_rate,
+            momentum=optimizer_cfg.get("momentum", 0.9),
+            weight_decay=weight_decay,
+        )
     if optimizer_name == "adafactor":
         from transformers.optimization import Adafactor
 
-        return Adafactor(model.parameters(), lr=learning_rate, weight_decay=weight_decay, scale_parameter=False, relative_step=False)
+        return Adafactor(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            scale_parameter=False,
+            relative_step=False,
+        )
     raise ValueError(f"Unsupported optimizer '{optimizer_name}'")
 
 
 def _create_scheduler(
     optimizer: torch.optim.Optimizer,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     num_training_steps: int,
-) -> Optional[Any]:
+) -> Any | None:
     scheduler_cfg = config.get("training", {}).get("scheduler", {}) or {}
     scheduler_name = scheduler_cfg.get("name", "linear")
     if scheduler_name in (None, "", "none"):
@@ -196,12 +223,22 @@ def _create_scheduler(
     )
 
 
-def _span_metrics(start_logits: torch.Tensor, end_logits: torch.Tensor, start_positions: torch.Tensor, end_positions: torch.Tensor) -> Dict[str, float]:
+def _span_metrics(
+    start_logits: torch.Tensor,
+    end_logits: torch.Tensor,
+    start_positions: torch.Tensor,
+    end_positions: torch.Tensor,
+) -> dict[str, float]:
     start_pred = start_logits.argmax(dim=-1)
     end_pred = end_logits.argmax(dim=-1)
     start_acc = (start_pred == start_positions).float().mean().item()
     end_acc = (end_pred == end_positions).float().mean().item()
-    exact_match = ((start_pred == start_positions) & (end_pred == end_positions)).float().mean().item()
+    exact_match = (
+        ((start_pred == start_positions) & (end_pred == end_positions))
+        .float()
+        .mean()
+        .item()
+    )
     return {
         "start_accuracy": start_acc,
         "end_accuracy": end_acc,
@@ -214,21 +251,28 @@ def _evaluate(
     dataloader: DataLoader,
     device: torch.device,
     loss_fn: nn.Module,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     model.eval()
-    losses: List[float] = []
-    all_start_logits: List[torch.Tensor] = []
-    all_end_logits: List[torch.Tensor] = []
-    all_start_labels: List[torch.Tensor] = []
-    all_end_labels: List[torch.Tensor] = []
+    losses: list[float] = []
+    all_start_logits: list[torch.Tensor] = []
+    all_end_logits: list[torch.Tensor] = []
+    all_start_labels: list[torch.Tensor] = []
+    all_end_labels: list[torch.Tensor] = []
 
     with torch.no_grad():
         for batch in dataloader:
-            inputs = {k: v.to(device) for k, v in batch.items() if k not in ("start_positions", "end_positions")}
+            inputs = {
+                k: v.to(device)
+                for k, v in batch.items()
+                if k not in ("start_positions", "end_positions")
+            }
             start_positions = batch["start_positions"].to(device)
             end_positions = batch["end_positions"].to(device)
             start_logits, end_logits = model(**inputs)
-            loss = (loss_fn(start_logits, start_positions) + loss_fn(end_logits, end_positions)) / 2
+            loss = (
+                loss_fn(start_logits, start_positions)
+                + loss_fn(end_logits, end_positions)
+            ) / 2
             losses.append(loss.item())
             all_start_logits.append(start_logits.detach().cpu())
             all_end_logits.append(end_logits.detach().cpu())
@@ -240,24 +284,32 @@ def _evaluate(
     start_labels_cat = torch.cat(all_start_labels)
     end_labels_cat = torch.cat(all_end_labels)
 
-    metrics = _span_metrics(start_logits_cat, end_logits_cat, start_labels_cat, end_labels_cat)
+    metrics = _span_metrics(
+        start_logits_cat, end_logits_cat, start_labels_cat, end_labels_cat
+    )
     metrics["loss"] = float(np.mean(losses)) if losses else 0.0
     return metrics
 
 
 def train(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *,
-    trial: Optional[optuna.Trial] = None,
+    trial: optuna.Trial | None = None,
     resume: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     logger = get_logger(__name__)
     seed = set_seed(config.get("training", {}).get("seed", 42))
     logger.info("Using random seed %s", seed)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.get("model", {}).get("pretrained_model", "bert-base-uncased"))
-    train_dataset, val_dataset, test_dataset = _prepare_datasets(config, tokenizer, seed)
-    train_loader, val_loader, test_loader = _create_dataloaders(train_dataset, val_dataset, test_dataset, config)
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.get("model", {}).get("pretrained_model", "bert-base-uncased")
+    )
+    train_dataset, val_dataset, test_dataset = _prepare_datasets(
+        config, tokenizer, seed
+    )
+    train_loader, val_loader, test_loader = _create_dataloaders(
+        train_dataset, val_dataset, test_dataset, config
+    )
 
     model = _build_model(config)
     device = _select_device(config)
@@ -271,7 +323,12 @@ def train(
     loss_fn = nn.CrossEntropyLoss()
 
     get_artifact_dir()
-    saver = best_model_saver(metric_name=config.get("training", {}).get("monitor_metric", "validation_span_em"), mode=config.get("training", {}).get("monitor_mode", "max"))
+    saver = best_model_saver(
+        metric_name=config.get("training", {}).get(
+            "monitor_metric", "validation_span_em"
+        ),
+        mode=config.get("training", {}).get("monitor_mode", "max"),
+    )
     saver.load_existing()
 
     start_epoch = 0
@@ -279,7 +336,9 @@ def train(
 
     if resume and training_state_exists("evidence"):
         logger.info("Resuming training from last checkpoint.")
-        checkpoint = load_training_state("evidence", model=model, optimizer=optimizer, scheduler=scheduler)
+        checkpoint = load_training_state(
+            "evidence", model=model, optimizer=optimizer, scheduler=scheduler
+        )
         start_epoch = checkpoint.get("epoch", 0) + 1
         global_step = checkpoint.get("global_step", 0)
         best_metric = checkpoint.get("best_metric")
@@ -288,7 +347,12 @@ def train(
         rng_state = checkpoint.get("rng_state")
         if rng_state and "torch" in rng_state:
             torch.set_rng_state(rng_state["torch"])
-        if rng_state and "cuda" in rng_state and rng_state["cuda"] is not None and torch.cuda.is_available():
+        if (
+            rng_state
+            and "cuda" in rng_state
+            and rng_state["cuda"] is not None
+            and torch.cuda.is_available()
+        ):
             torch.cuda.set_rng_state_all(rng_state["cuda"])
 
     mlflow_cfg = deepcopy(config.get("mlflow", {}))
@@ -301,13 +365,17 @@ def train(
         )
         enable_autologging()
 
-    flattened: Dict[str, Any] = {}
+    flattened: dict[str, Any] = {}
     _flatten_dict("", {k: v for k, v in config.items() if k != "mlflow"}, flattened)
 
-    runtime_metrics: Dict[str, Any] = {}
+    runtime_metrics: dict[str, Any] = {}
     start_time = time.time()
 
-    with mlflow_run(name=config.get("project", "evidence")) if mlflow_cfg else nullcontext():
+    with (
+        mlflow_run(name=config.get("project", "evidence"))
+        if mlflow_cfg
+        else nullcontext()
+    ):
         if mlflow_cfg:
             import mlflow
 
@@ -318,19 +386,26 @@ def train(
             model.train()
             optimizer.zero_grad(set_to_none=True)
 
-            epoch_losses: List[float] = []
-            epoch_start_logits: List[torch.Tensor] = []
-            epoch_end_logits: List[torch.Tensor] = []
-            epoch_start_labels: List[torch.Tensor] = []
-            epoch_end_labels: List[torch.Tensor] = []
+            epoch_losses: list[float] = []
+            epoch_start_logits: list[torch.Tensor] = []
+            epoch_end_logits: list[torch.Tensor] = []
+            epoch_start_labels: list[torch.Tensor] = []
+            epoch_end_labels: list[torch.Tensor] = []
 
             for step, batch in enumerate(train_loader):
-                inputs = {k: v.to(device) for k, v in batch.items() if k not in ("start_positions", "end_positions")}
+                inputs = {
+                    k: v.to(device)
+                    for k, v in batch.items()
+                    if k not in ("start_positions", "end_positions")
+                }
                 start_positions = batch["start_positions"].to(device)
                 end_positions = batch["end_positions"].to(device)
 
                 start_logits, end_logits = model(**inputs)
-                loss = (loss_fn(start_logits, start_positions) + loss_fn(end_logits, end_positions)) / 2
+                loss = (
+                    loss_fn(start_logits, start_positions)
+                    + loss_fn(end_logits, end_positions)
+                ) / 2
                 loss = loss / grad_accum
                 loss.backward()
 
@@ -341,24 +416,41 @@ def train(
                 epoch_end_labels.append(end_positions.detach().cpu())
 
                 if (step + 1) % grad_accum == 0 or (step + 1) == len(train_loader):
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.get("training", {}).get("max_grad_norm", 1.0))
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        config.get("training", {}).get("max_grad_norm", 1.0),
+                    )
                     optimizer.step()
                     if scheduler is not None:
                         scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
                     global_step += 1
 
-                if mlflow_cfg and global_step % config.get("training", {}).get("logging_steps", 50) == 0:
+                if (
+                    mlflow_cfg
+                    and global_step
+                    % config.get("training", {}).get("logging_steps", 50)
+                    == 0
+                ):
                     import mlflow
 
-                    mlflow.log_metric("train_loss_step", loss.item() * grad_accum, step=global_step)
+                    mlflow.log_metric(
+                        "train_loss_step", loss.item() * grad_accum, step=global_step
+                    )
 
             train_start_logits = torch.cat(epoch_start_logits)
             train_end_logits = torch.cat(epoch_end_logits)
             train_start_labels = torch.cat(epoch_start_labels)
             train_end_labels = torch.cat(epoch_end_labels)
-            train_metrics = _span_metrics(train_start_logits, train_end_logits, train_start_labels, train_end_labels)
-            train_metrics["loss"] = float(np.mean(epoch_losses)) if epoch_losses else 0.0
+            train_metrics = _span_metrics(
+                train_start_logits,
+                train_end_logits,
+                train_start_labels,
+                train_end_labels,
+            )
+            train_metrics["loss"] = (
+                float(np.mean(epoch_losses)) if epoch_losses else 0.0
+            )
 
             val_metrics = _evaluate(model, val_loader, device, loss_fn)
 
@@ -373,7 +465,9 @@ def train(
                 mlflow.log_metrics(prefixed_train, step=epoch + 1)
                 mlflow.log_metrics(prefixed_val, step=epoch + 1)
 
-            monitor_metric = config.get("training", {}).get("monitor_metric", "validation_span_em")
+            monitor_metric = config.get("training", {}).get(
+                "monitor_metric", "validation_span_em"
+            )
             metric_value = prefixed_val.get(monitor_metric, val_metrics.get("span_em"))
 
             saver.update(
@@ -406,7 +500,11 @@ def train(
 
         runtime_metrics = {"training_time": time.time() - start_time}
 
-    metrics = {"best_metric": saver.best_metric, "best_metric_name": saver.metric_name, **runtime_metrics}
+    metrics = {
+        "best_metric": saver.best_metric,
+        "best_metric_name": saver.metric_name,
+        **runtime_metrics,
+    }
 
     if test_loader is not None:
         logger.info("Evaluating best checkpoint on test split.")

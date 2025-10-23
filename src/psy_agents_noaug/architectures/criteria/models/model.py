@@ -1,88 +1,96 @@
-from typing import Optional, Sequence
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import torch
-import transformers
+from torch import nn
+from transformers import AutoModel
+from transformers.modeling_outputs import SequenceClassifierOutput
+
+from psy_agents_noaug.architectures.utils import ClassificationHead, SequencePooler
 
 
-class ClassificationHead(torch.nn.Module):
-    def __init__(
-        self,
-        input_dim: int,
-        num_labels: int,
-        dropout_prob: float = 0.1,
-        layer_num: int = 1,
-        hidden_dims: Optional[Sequence[int]] = None,
-    ) -> None:
-        super().__init__()
-        if layer_num < 1:
-            raise ValueError("layer_num must be at least 1.")
-
-        if hidden_dims is not None:
-            hidden_dims = tuple(hidden_dims)
-            if len(hidden_dims) != layer_num - 1:
-                raise ValueError(
-                    "hidden_dims length must be equal to layer_num - 1 when provided."
-                )
-        else:
-            hidden_dims = tuple([input_dim] * (layer_num - 1))
-
-        dims = (input_dim,) + hidden_dims
-
-        hidden_layers = []
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
-            hidden_layers.append(torch.nn.Linear(in_dim, out_dim))
-            hidden_layers.append(torch.nn.GELU())
-            hidden_layers.append(torch.nn.Dropout(dropout_prob))
-
-        self.hidden_layers = torch.nn.Sequential(*hidden_layers)
-        self.dropout = torch.nn.Dropout(dropout_prob)
-        self.output_layer = torch.nn.Linear(dims[-1], num_labels)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.dropout(x)
-        if len(self.hidden_layers) > 0:
-            x = self.hidden_layers(x)
-        return self.output_layer(x)
-
-
-class Model(torch.nn.Module):
+class Model(nn.Module):
     def __init__(
         self,
         model_name: str = "bert-base-uncased",
+        *,
+        head_cfg: dict[str, Any] | None = None,
+        task_cfg: dict[str, Any] | None = None,
         num_labels: int = 2,
         classifier_dropout: float = 0.1,
         classifier_layer_num: int = 1,
-        classifier_hidden_dims: Optional[Sequence[int]] = None,
+        classifier_hidden_dims: Sequence[int] | None = None,
+        **_: Any,
     ) -> None:
         super().__init__()
-        self.encoder = transformers.AutoModel.from_pretrained(model_name)
+        head_cfg = dict(head_cfg or {})
+        task_cfg = dict(task_cfg or {})
+
+        self.encoder = AutoModel.from_pretrained(model_name)
         hidden_size = self.encoder.config.hidden_size
 
-        if classifier_hidden_dims is not None:
-            classifier_layer_num = len(classifier_hidden_dims) + 1
+        if classifier_hidden_dims is not None and "layers" not in head_cfg:
+            classifier_layer_num = len(tuple(classifier_hidden_dims)) + 1
 
+        resolved_labels = task_cfg.get(
+            "num_labels",
+            head_cfg.get("num_labels", num_labels),
+        )
+        layers = head_cfg.get("layers", classifier_layer_num)
+        hidden = head_cfg.get("hidden", classifier_hidden_dims)
+        activation = head_cfg.get("activation", "gelu")
+        dropout = head_cfg.get("dropout", classifier_dropout)
+        pooling = head_cfg.get("pooling") or task_cfg.get("pooling") or "cls"
+
+        self.pooler = SequencePooler(hidden_size, pooling=pooling)
         self.classifier = ClassificationHead(
-            input_dim=hidden_size,
-            num_labels=num_labels,
-            dropout_prob=classifier_dropout,
-            layer_num=classifier_layer_num,
-            hidden_dims=classifier_hidden_dims,
+            hidden_size,
+            num_labels=resolved_labels,
+            layers=layers,
+            hidden=hidden,
+            activation=activation,
+            dropout=dropout,
         )
 
     def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        outputs = self.encoder(
+        self, *args: Any, **kwargs: Any
+    ) -> SequenceClassifierOutput | tuple[torch.Tensor]:
+        if args:
+            if isinstance(args[0], Mapping):
+                forwarded = dict(args[0])
+                forwarded.update(kwargs)
+                kwargs = forwarded
+            else:
+                raise TypeError(
+                    "Unexpected positional arguments passed to Model.forward"
+                )
+
+        return_dict = kwargs.pop("return_dict", True)
+        input_ids = kwargs.pop("input_ids", None)
+        attention_mask = kwargs.pop("attention_mask", None)
+        token_type_ids = kwargs.pop("token_type_ids", None)
+
+        encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             return_dict=True,
+            **kwargs,
         )
-        pooled_output = outputs.pooler_output
-        if pooled_output is None:
-            pooled_output = outputs.last_hidden_state[:, 0, :]
-        logits = self.classifier(pooled_output)
-        return logits
+
+        pooled = self.pooler(
+            encoder_outputs.last_hidden_state,
+            attention_mask=attention_mask,
+            pooler_output=encoder_outputs.pooler_output,
+        )
+        logits = self.classifier(pooled)
+
+        if return_dict:
+            return SequenceClassifierOutput(
+                logits=logits,
+                hidden_states=encoder_outputs.hidden_states,
+                attentions=encoder_outputs.attentions,
+            )
+        return (logits,)

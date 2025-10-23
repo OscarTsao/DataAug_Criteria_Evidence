@@ -1,22 +1,28 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from psy_agents_noaug.architectures.utils import build_criterion_text_map, resolve_criterion_text
+from psy_agents_noaug.architectures.utils import (
+    build_criterion_text_map,
+    resolve_criterion_text,
+)
 from psy_agents_noaug.architectures.utils.dsm_criteria import DEFAULT_DSM_CRITERIA_PATH
 
 DEFAULT_DATASET_PATH = (
-    Path(__file__).resolve().parents[5] / "data" / "processed" / "redsm5_matched_evidence.csv"
+    Path(__file__).resolve().parents[5]
+    / "data"
+    / "processed"
+    / "redsm5_matched_evidence.csv"
 )
 
 
-def _find_answer_span(context: str, answer: str) -> Tuple[int, int]:
+def _find_answer_span(context: str, answer: str) -> tuple[int, int]:
     """Locate the answer span within the context and return character indices."""
     answer = answer.strip()
     start_idx = context.find(answer)
@@ -38,9 +44,9 @@ def _token_span_from_char(
     offsets: torch.Tensor,
     start_char: int,
     end_char: int,
-    sequence_ids: Optional[Sequence[Optional[int]]] = None,
+    sequence_ids: Sequence[int | None] | None = None,
     target_sequence_id: int = 0,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     start_token = None
     end_token = None
     offsets_list = offsets.tolist()
@@ -66,16 +72,16 @@ class EvidenceDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
         tokenizer_name: str = "bert-base-uncased",
         context_column: str = "post_text",
         answer_column: str = "sentence_text",
         max_length: int = 512,
         padding: str = "max_length",
         truncation: bool = True,
-        criterion_column: Optional[str] = None,
-        dsm_criteria_path: Optional[Union[Path, str]] = None,
+        criterion_column: str | None = None,
+        dsm_criteria_path: Path | str | None = None,
     ) -> None:
         super().__init__()
         self.csv_path = Path(csv_path or DEFAULT_DATASET_PATH)
@@ -85,8 +91,10 @@ class EvidenceDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -96,13 +104,15 @@ class EvidenceDataset(Dataset):
         self.max_length = max_length
         self.padding = padding
         self.truncation = truncation
-        self.criterion_columns: List[str] = []
+        self.criterion_columns: list[str] = []
         if criterion_column:
             self.criterion_columns.append(criterion_column)
         self.criterion_columns.extend(["criterion_id", "DSM5_symptom"])
-        seen: Dict[str, None] = {}
+        seen: dict[str, None] = {}
         self.criterion_columns = [
-            column for column in self.criterion_columns if not (column in seen or seen.setdefault(column, None))
+            column
+            for column in self.criterion_columns
+            if not (column in seen or seen.setdefault(column, None))
         ]
 
         missing_columns = [
@@ -130,11 +140,11 @@ class EvidenceDataset(Dataset):
             )
 
     @staticmethod
-    def _format_identifier(identifier: Union[str, int]) -> str:
+    def _format_identifier(identifier: str | int) -> str:
         text = str(identifier).replace("_", " ").replace("-", " ").strip()
         return text if text else str(identifier)
 
-    def _get_criterion_text(self, example: Dict[str, str]) -> str:
+    def _get_criterion_text(self, example: dict[str, str]) -> str:
         if self.has_direct_text_column:
             raw_text = str(example.get("criterion_text", "")).strip()
             if raw_text:
@@ -158,7 +168,7 @@ class EvidenceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
 
         context = example[self.context_column]
@@ -187,7 +197,7 @@ class EvidenceDataset(Dataset):
             target_sequence_id=0,
         )
 
-        item: Dict[str, torch.Tensor] = {
+        item: dict[str, torch.Tensor] = {
             key: value.squeeze(0) for key, value in encoded.items()
         }
         item["start_positions"] = torch.tensor(start_token, dtype=torch.long)
@@ -196,9 +206,9 @@ class EvidenceDataset(Dataset):
 
 
 def load_evidence_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[EvidenceDataset, Tuple[Dataset, ...]]:
+) -> EvidenceDataset | tuple[Dataset, ...]:
     dataset: EvidenceDataset = EvidenceDataset(**dataset_kwargs)
     if not splits:
         return dataset

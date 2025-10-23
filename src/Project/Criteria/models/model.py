@@ -1,4 +1,5 @@
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 import transformers
@@ -11,7 +12,7 @@ class ClassificationHead(torch.nn.Module):
         num_labels: int,
         dropout_prob: float = 0.1,
         layer_num: int = 1,
-        hidden_dims: Optional[Sequence[int]] = None,
+        hidden_dims: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
         if layer_num < 1:
@@ -49,12 +50,47 @@ class Model(torch.nn.Module):
     def __init__(
         self,
         model_name: str = "bert-base-uncased",
+        *,
+        head_cfg: dict[str, Any] | None = None,
+        task_cfg: dict[str, Any] | None = None,
         num_labels: int = 2,
         classifier_dropout: float = 0.1,
         classifier_layer_num: int = 1,
-        classifier_hidden_dims: Optional[Sequence[int]] = None,
+        classifier_hidden_dims: Sequence[int] | None = None,
     ) -> None:
+        """
+        Initialize Criteria classification model.
+
+        Args:
+            model_name: HuggingFace model identifier
+            head_cfg: Head configuration dict (optional, for HPO compatibility)
+                Expected keys: layers, hidden, activation, dropout, pooling
+            task_cfg: Task configuration dict (optional, for HPO compatibility)
+                Expected keys: num_labels
+            num_labels: Number of output classes (overridden by task_cfg)
+            classifier_dropout: Dropout probability (overridden by head_cfg)
+            classifier_layer_num: Number of layers (overridden by head_cfg)
+            classifier_hidden_dims: Hidden dimensions (overridden by head_cfg)
+        """
         super().__init__()
+
+        # Extract from head_cfg if provided (for HPO compatibility)
+        if head_cfg:
+            classifier_dropout = head_cfg.get("dropout", classifier_dropout)
+            classifier_layer_num = head_cfg.get("layers", classifier_layer_num)
+            hidden = head_cfg.get("hidden", None)
+            if hidden is not None:
+                if isinstance(hidden, int):
+                    # Single value: create uniform hidden dims
+                    classifier_hidden_dims = (hidden,) * (classifier_layer_num - 1)
+                elif isinstance(hidden, (list, tuple)):
+                    # Sequence: use as provided
+                    classifier_hidden_dims = tuple(hidden)
+
+        # Extract from task_cfg if provided
+        if task_cfg:
+            num_labels = task_cfg.get("num_labels", num_labels)
+
         self.encoder = transformers.AutoModel.from_pretrained(model_name)
         hidden_size = self.encoder.config.hidden_size
 
@@ -72,8 +108,8 @@ class Model(torch.nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         outputs = self.encoder(
             input_ids=input_ids,

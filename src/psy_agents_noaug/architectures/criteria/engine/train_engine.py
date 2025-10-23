@@ -5,7 +5,7 @@ import random
 import time
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import optuna
@@ -23,16 +23,14 @@ from psy_agents_noaug.architectures.criteria.utils import (
     enable_autologging,
     get_artifact_dir,
     get_logger,
-    load_best_model,
     load_training_state,
     mlflow_run,
-    save_training_state,
     set_seed,
     training_state_exists,
 )
 
 
-def _flatten_dict(prefix: str, value: Any, accumulator: Dict[str, Any]) -> None:
+def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
@@ -49,14 +47,18 @@ def _seed_worker(worker_id: int) -> None:
 
 
 def _prepare_datasets(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     tokenizer: AutoTokenizer,
     seed: int,
-) -> Tuple[Dataset, Dataset, Optional[Dataset]]:
+) -> tuple[Dataset, Dataset, Dataset | None]:
     dataset_cfg = config.get("dataset", {})
     splits = dataset_cfg.get("splits", [0.8, 0.1, 0.1])
     if isinstance(splits, dict):
-        splits = [splits.get("train", 0.8), splits.get("val", 0.1), splits.get("test", 0.1)]
+        splits = [
+            splits.get("train", 0.8),
+            splits.get("val", 0.1),
+            splits.get("test", 0.1),
+        ]
     if len(splits) == 2:
         splits = [splits[0], splits[1], 0.0]
     if not math.isclose(sum(splits), 1.0, rel_tol=1e-3):
@@ -92,12 +94,12 @@ def _prepare_datasets(
 def _create_dataloaders(
     train_dataset: Dataset,
     val_dataset: Dataset,
-    test_dataset: Optional[Dataset],
+    test_dataset: Dataset | None,
     *,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     seed: int,
     device: torch.device,
-) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     dataset_cfg = config.get("dataset", {})
     training_cfg = config.get("training", {})
     num_workers = dataset_cfg.get("num_workers", 0)
@@ -146,7 +148,7 @@ def _create_dataloaders(
     return train_loader, val_loader, test_loader
 
 
-def _build_model(config: Dict[str, Any]) -> Model:
+def _build_model(config: dict[str, Any]) -> Model:
     model_cfg = config.get("model", {})
     model_name = model_cfg.get("pretrained_model", "bert-base-uncased")
     num_labels = model_cfg.get("num_labels", 2)
@@ -159,7 +161,7 @@ def _build_model(config: Dict[str, Any]) -> Model:
     )
 
 
-def _select_device(config: Dict[str, Any]) -> torch.device:
+def _select_device(config: dict[str, Any]) -> torch.device:
     preferred = config.get("training", {}).get("device")
     if preferred:
         return torch.device(preferred)
@@ -170,7 +172,9 @@ def _select_device(config: Dict[str, Any]) -> torch.device:
     return torch.device("cpu")
 
 
-def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.Optimizer:
+def _create_optimizer(
+    model: nn.Module, config: dict[str, Any]
+) -> torch.optim.Optimizer:
     training_cfg = config.get("training", {})
     optimizer_cfg = training_cfg.get("optimizer", {}) or {}
     optimizer_name = optimizer_cfg.get("name", "adamw").lower()
@@ -180,11 +184,19 @@ def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.O
 
     grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if p.requires_grad and not any(nd in n for nd in no_decay)
+            ],
             "weight_decay": weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if p.requires_grad and any(nd in n for nd in no_decay)
+            ],
             "weight_decay": 0.0,
         },
     ]
@@ -192,7 +204,9 @@ def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.O
     if optimizer_name == "adamw":
         return torch.optim.AdamW(grouped_parameters, lr=learning_rate)
     if optimizer_name == "adam":
-        return torch.optim.Adam(grouped_parameters, lr=learning_rate, weight_decay=weight_decay)
+        return torch.optim.Adam(
+            grouped_parameters, lr=learning_rate, weight_decay=weight_decay
+        )
     if optimizer_name == "sgd":
         return torch.optim.SGD(
             grouped_parameters,
@@ -215,9 +229,9 @@ def _create_optimizer(model: nn.Module, config: Dict[str, Any]) -> torch.optim.O
 
 def _create_scheduler(
     optimizer: torch.optim.Optimizer,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     num_training_steps: int,
-) -> Optional[Any]:
+) -> Any | None:
     scheduler_cfg = config.get("training", {}).get("scheduler", {}) or {}
     scheduler_name = scheduler_cfg.get("name", "linear")
     if scheduler_name in (None, "", "none"):
@@ -241,7 +255,9 @@ def _create_scheduler(
     )
 
 
-def _classification_metrics(predictions: torch.Tensor, targets: torch.Tensor) -> Dict[str, float]:
+def _classification_metrics(
+    predictions: torch.Tensor, targets: torch.Tensor
+) -> dict[str, float]:
     preds = predictions.argmax(dim=-1)
     correct = (preds == targets).sum().item()
     total = targets.numel()
@@ -269,11 +285,11 @@ def _evaluate(
     device: torch.device,
     loss_fn: nn.Module,
     amp_enabled: bool,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     model.eval()
-    losses: List[float] = []
-    all_preds: List[torch.Tensor] = []
-    all_labels: List[torch.Tensor] = []
+    losses: list[float] = []
+    all_preds: list[torch.Tensor] = []
+    all_labels: list[torch.Tensor] = []
 
     autocast_enabled = amp_enabled and device.type == "cuda"
 
@@ -298,16 +314,21 @@ def _evaluate(
     return metrics
 
 
-def _move_batch_to_device(batch: Dict[str, torch.Tensor], device: torch.device) -> Dict[str, torch.Tensor]:
-    return {key: value.to(device) if isinstance(value, torch.Tensor) else value for key, value in batch.items()}
+def _move_batch_to_device(
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> dict[str, torch.Tensor]:
+    return {
+        key: value.to(device) if isinstance(value, torch.Tensor) else value
+        for key, value in batch.items()
+    }
 
 
 def train(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *,
-    trial: Optional[optuna.Trial] = None,
+    trial: optuna.Trial | None = None,
     resume: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     logger = get_logger(__name__)
     training_cfg = config.get("training", {})
     deterministic = training_cfg.get("deterministic", True)
@@ -316,8 +337,12 @@ def train(
     seed = set_seed(seed_value, deterministic=deterministic)
     logger.info("Using random seed %s (deterministic=%s)", seed, deterministic)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.get("model", {}).get("pretrained_model", "bert-base-uncased"))
-    train_dataset, val_dataset, test_dataset = _prepare_datasets(config, tokenizer, seed)
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.get("model", {}).get("pretrained_model", "bert-base-uncased")
+    )
+    train_dataset, val_dataset, test_dataset = _prepare_datasets(
+        config, tokenizer, seed
+    )
 
     device = _select_device(config)
     if device.type == "cuda":
@@ -341,7 +366,10 @@ def train(
     total_update_steps = math.ceil(len(train_loader) / grad_accum) * epochs
     scheduler = _create_scheduler(optimizer, config, total_update_steps)
 
-    amp_enabled = training_cfg.get("mixed_precision", device.type == "cuda") and device.type == "cuda"
+    amp_enabled = (
+        training_cfg.get("mixed_precision", device.type == "cuda")
+        and device.type == "cuda"
+    )
     scaler = GradScaler(enabled=amp_enabled)
     loss_fn = nn.CrossEntropyLoss()
 
@@ -357,7 +385,9 @@ def train(
 
     if resume and training_state_exists("criteria"):
         logger.info("Resuming training from last checkpoint.")
-        checkpoint = load_training_state("criteria", model=model, optimizer=optimizer, scheduler=scheduler)
+        checkpoint = load_training_state(
+            "criteria", model=model, optimizer=optimizer, scheduler=scheduler
+        )
         start_epoch = checkpoint.get("epoch", 0) + 1
         global_step = checkpoint.get("global_step", 0)
         best_metric = checkpoint.get("best_metric")
@@ -366,7 +396,12 @@ def train(
         rng_state = checkpoint.get("rng_state")
         if rng_state and "torch" in rng_state:
             torch.set_rng_state(rng_state["torch"])
-        if rng_state and "cuda" in rng_state and rng_state["cuda"] is not None and torch.cuda.is_available():
+        if (
+            rng_state
+            and "cuda" in rng_state
+            and rng_state["cuda"] is not None
+            and torch.cuda.is_available()
+        ):
             torch.cuda.set_rng_state_all(rng_state["cuda"])
 
     mlflow_cfg = deepcopy(config.get("mlflow", {}))
@@ -379,13 +414,19 @@ def train(
         )
         enable_autologging()
 
-    flatten_config: Dict[str, Any] = {}
-    _flatten_dict("", {k: v for k, v in config.items() if k != "mlflow"}, flatten_config)
+    flatten_config: dict[str, Any] = {}
+    _flatten_dict(
+        "", {k: v for k, v in config.items() if k != "mlflow"}, flatten_config
+    )
 
-    runtime_metrics: Dict[str, Any] = {}
+    runtime_metrics: dict[str, Any] = {}
     start_time = time.time()
 
-    with mlflow_run(name=config.get("project", "criteria")) if mlflow_cfg else nullcontext():
+    with (
+        mlflow_run(name=config.get("project", "criteria"))
+        if mlflow_cfg
+        else nullcontext()
+    ):
         if mlflow_cfg:
             import mlflow
 
@@ -397,14 +438,17 @@ def train(
             optimizer.zero_grad(set_to_none=True)
 
             epoch_loss = 0.0
-            epoch_preds: List[torch.Tensor] = []
-            epoch_labels: List[torch.Tensor] = []
+            epoch_preds: list[torch.Tensor] = []
+            epoch_labels: list[torch.Tensor] = []
 
             for step, batch in enumerate(train_loader):
                 batch = _move_batch_to_device(batch, device)
 
                 with autocast(enabled=amp_enabled):
-                    outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+                    outputs = model(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                    )
                     loss = loss_fn(outputs, batch["labels"])
                     loss = loss / grad_accum
 
@@ -421,7 +465,9 @@ def train(
                 if (step + 1) % grad_accum == 0 or (step + 1) == len(train_loader):
                     if amp_enabled:
                         scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), training_cfg.get("max_grad_norm", 1.0))
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), training_cfg.get("max_grad_norm", 1.0)
+                    )
                     if amp_enabled:
                         scaler.step(optimizer)
                         scaler.update()
@@ -432,12 +478,19 @@ def train(
                     optimizer.zero_grad(set_to_none=True)
                     global_step += 1
 
-                if mlflow_cfg and global_step % training_cfg.get("logging_steps", 50) == 0:
+                if (
+                    mlflow_cfg
+                    and global_step % training_cfg.get("logging_steps", 50) == 0
+                ):
                     import mlflow
 
-                    mlflow.log_metric("train_loss_step", loss_scalar * grad_accum, step=global_step)
+                    mlflow.log_metric(
+                        "train_loss_step", loss_scalar * grad_accum, step=global_step
+                    )
 
-            train_metrics = _classification_metrics(torch.cat(epoch_preds), torch.cat(epoch_labels))
+            train_metrics = _classification_metrics(
+                torch.cat(epoch_preds), torch.cat(epoch_labels)
+            )
             train_metrics["loss"] = epoch_loss / max(1, len(train_loader))
 
             val_metrics = _evaluate(model, val_loader, device, loss_fn, amp_enabled)

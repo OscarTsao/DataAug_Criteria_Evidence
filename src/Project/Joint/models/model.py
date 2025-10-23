@@ -1,4 +1,5 @@
-from typing import Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 import transformers
@@ -11,7 +12,7 @@ class ClassificationHead(torch.nn.Module):
         num_labels: int,
         dropout_prob: float = 0.1,
         layer_num: int = 1,
-        hidden_dims: Optional[Sequence[int]] = None,
+        hidden_dims: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
         if layer_num < 1:
@@ -50,7 +51,9 @@ class SpanPredictionHead(torch.nn.Module):
         self.dropout = torch.nn.Dropout(dropout_prob)
         self.linear = torch.nn.Linear(hidden_size, 2)
 
-    def forward(self, sequence_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, sequence_output: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         sequence_output = self.dropout(sequence_output)
         logits = self.linear(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -62,16 +65,58 @@ class Model(torch.nn.Module):
         self,
         criteria_model_name: str = "bert-base-uncased",
         evidence_model_name: str = "bert-base-uncased",
+        *,
+        head_cfg: dict[str, Any] | None = None,
+        task_cfg: dict[str, Any] | None = None,
         criteria_num_labels: int = 2,
         criteria_dropout: float = 0.1,
         criteria_layer_num: int = 1,
-        criteria_hidden_dims: Optional[Sequence[int]] = None,
+        criteria_hidden_dims: Sequence[int] | None = None,
         evidence_dropout: float = 0.1,
         fusion_dropout: float = 0.1,
     ) -> None:
+        """
+        Initialize Joint model with dual encoders and fusion layer.
+
+        Args:
+            criteria_model_name: HuggingFace model for criteria encoder
+            evidence_model_name: HuggingFace model for evidence encoder
+            head_cfg: Head configuration dict (optional, for HPO compatibility)
+                Expected keys: layers, hidden, activation, dropout
+            task_cfg: Task configuration dict (optional, for HPO compatibility)
+                Expected keys: num_labels
+            criteria_num_labels: Number of criteria classes (overridden by task_cfg)
+            criteria_dropout: Criteria head dropout (overridden by head_cfg)
+            criteria_layer_num: Criteria head layers (overridden by head_cfg)
+            criteria_hidden_dims: Criteria hidden dims (overridden by head_cfg)
+            evidence_dropout: Evidence head dropout (overridden by head_cfg)
+            fusion_dropout: Fusion layer dropout (overridden by head_cfg)
+        """
         super().__init__()
-        self.criteria_encoder = transformers.AutoModel.from_pretrained(criteria_model_name)
-        self.evidence_encoder = transformers.AutoModel.from_pretrained(evidence_model_name)
+
+        # Extract from head_cfg if provided (for HPO compatibility)
+        if head_cfg:
+            criteria_dropout = head_cfg.get("dropout", criteria_dropout)
+            evidence_dropout = head_cfg.get("dropout", evidence_dropout)
+            fusion_dropout = head_cfg.get("dropout", fusion_dropout)
+            criteria_layer_num = head_cfg.get("layers", criteria_layer_num)
+            hidden = head_cfg.get("hidden", None)
+            if hidden is not None:
+                if isinstance(hidden, int):
+                    criteria_hidden_dims = (hidden,) * (criteria_layer_num - 1)
+                elif isinstance(hidden, (list, tuple)):
+                    criteria_hidden_dims = tuple(hidden)
+
+        # Extract from task_cfg if provided
+        if task_cfg:
+            criteria_num_labels = task_cfg.get("num_labels", criteria_num_labels)
+
+        self.criteria_encoder = transformers.AutoModel.from_pretrained(
+            criteria_model_name
+        )
+        self.evidence_encoder = transformers.AutoModel.from_pretrained(
+            evidence_model_name
+        )
 
         criteria_hidden_size = self.criteria_encoder.config.hidden_size
         evidence_hidden_size = self.evidence_encoder.config.hidden_size
@@ -91,16 +136,18 @@ class Model(torch.nn.Module):
             torch.nn.Linear(criteria_hidden_size, evidence_hidden_size),
             torch.nn.GELU(),
         )
-        self.evidence_head = SpanPredictionHead(evidence_hidden_size, dropout_prob=evidence_dropout)
+        self.evidence_head = SpanPredictionHead(
+            evidence_hidden_size, dropout_prob=evidence_dropout
+        )
 
     def forward(
         self,
         criteria_input_ids: torch.Tensor,
-        criteria_attention_mask: Optional[torch.Tensor] = None,
-        criteria_token_type_ids: Optional[torch.Tensor] = None,
-        evidence_input_ids: Optional[torch.Tensor] = None,
-        evidence_attention_mask: Optional[torch.Tensor] = None,
-        evidence_token_type_ids: Optional[torch.Tensor] = None,
+        criteria_attention_mask: torch.Tensor | None = None,
+        criteria_token_type_ids: torch.Tensor | None = None,
+        evidence_input_ids: torch.Tensor | None = None,
+        evidence_attention_mask: torch.Tensor | None = None,
+        evidence_token_type_ids: torch.Tensor | None = None,
         return_dict: bool = False,
     ):
         criteria_outputs = self.criteria_encoder(
@@ -135,7 +182,7 @@ class Model(torch.nn.Module):
 
         if return_dict:
             return {
-                "criteria_logits": criteria_logits,
+                "logits": criteria_logits,  # Fixed: was "criteria_logits"
                 "start_logits": start_logits,
                 "end_logits": end_logits,
             }

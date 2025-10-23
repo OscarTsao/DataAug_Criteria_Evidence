@@ -1,112 +1,138 @@
-from typing import Optional, Sequence, Tuple
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 import torch
-import transformers
+from torch import nn
+from transformers import AutoModel
+from transformers.modeling_outputs import ModelOutput
+
+from psy_agents_noaug.architectures.utils import (
+    ClassificationHead,
+    SequencePooler,
+    SpanPredictionHead,
+    make_bool_safe,
+)
 
 
-class ClassificationHead(torch.nn.Module):
-    def __init__(
-        self,
-        input_dim: int,
-        num_labels: int,
-        dropout_prob: float = 0.1,
-        layer_num: int = 1,
-        hidden_dims: Optional[Sequence[int]] = None,
-    ) -> None:
-        super().__init__()
-        if layer_num < 1:
-            raise ValueError("layer_num must be at least 1.")
-
-        if hidden_dims is not None:
-            hidden_dims = tuple(hidden_dims)
-            if len(hidden_dims) != layer_num - 1:
-                raise ValueError(
-                    "hidden_dims length must be equal to layer_num - 1 when provided."
-                )
-        else:
-            hidden_dims = tuple([input_dim] * (layer_num - 1))
-
-        dims = (input_dim,) + hidden_dims
-        layers = []
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
-            layers.append(torch.nn.Linear(in_dim, out_dim))
-            layers.append(torch.nn.GELU())
-            layers.append(torch.nn.Dropout(dropout_prob))
-
-        self.hidden_layers = torch.nn.Sequential(*layers)
-        self.dropout = torch.nn.Dropout(dropout_prob)
-        self.output_layer = torch.nn.Linear(dims[-1], num_labels)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.dropout(x)
-        if len(self.hidden_layers) > 0:
-            x = self.hidden_layers(x)
-        return self.output_layer(x)
+@dataclass
+class ShareOutput(ModelOutput):
+    logits: torch.Tensor | None = None
+    start_logits: torch.Tensor | None = None
+    end_logits: torch.Tensor | None = None
+    hidden_states: tuple[torch.Tensor, ...] | None = None
+    attentions: tuple[torch.Tensor, ...] | None = None
 
 
-class SpanPredictionHead(torch.nn.Module):
-    def __init__(self, hidden_size: int, dropout_prob: float = 0.1) -> None:
-        super().__init__()
-        self.dropout = torch.nn.Dropout(dropout_prob)
-        self.linear = torch.nn.Linear(hidden_size, 2)
-
-    def forward(self, sequence_output: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sequence_output = self.dropout(sequence_output)
-        logits = self.linear(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
-        return start_logits.squeeze(-1), end_logits.squeeze(-1)
-
-
-class Model(torch.nn.Module):
+class Model(nn.Module):
     def __init__(
         self,
         model_name: str = "bert-base-uncased",
+        *,
+        head_cfg: dict[str, Any] | None = None,
+        task_cfg: dict[str, Any] | None = None,
         criteria_num_labels: int = 2,
         criteria_dropout: float = 0.1,
         criteria_layer_num: int = 1,
-        criteria_hidden_dims: Optional[Sequence[int]] = None,
+        criteria_hidden_dims: tuple[int, ...] | None = None,
         evidence_dropout: float = 0.1,
+        **_: Any,
     ) -> None:
         super().__init__()
-        self.encoder = transformers.AutoModel.from_pretrained(model_name)
+        head_cfg = dict(head_cfg or {})
+        task_cfg = dict(task_cfg or {})
+
+        self.encoder = AutoModel.from_pretrained(model_name)
         hidden_size = self.encoder.config.hidden_size
 
-        if criteria_hidden_dims is not None:
-            criteria_layer_num = len(criteria_hidden_dims) + 1
+        criteria_cfg = dict(head_cfg.get("criteria", head_cfg))
+        evidence_cfg = dict(head_cfg.get("evidence", head_cfg))
 
-        self.criteria_head = ClassificationHead(
-            input_dim=hidden_size,
-            num_labels=criteria_num_labels,
-            dropout_prob=criteria_dropout,
-            layer_num=criteria_layer_num,
-            hidden_dims=criteria_hidden_dims,
+        num_labels = (
+            task_cfg.get("criteria_num_labels")
+            or task_cfg.get("num_labels")
+            or criteria_cfg.get("num_labels")
+            or criteria_num_labels
         )
-        self.evidence_head = SpanPredictionHead(hidden_size, dropout_prob=evidence_dropout)
+
+        pooling = criteria_cfg.get("pooling") or task_cfg.get("pooling") or "cls"
+        if criteria_hidden_dims is not None and "layers" not in criteria_cfg:
+            criteria_layer_num = len(tuple(criteria_hidden_dims)) + 1
+        criteria_layers = criteria_cfg.get("layers", criteria_layer_num)
+        criteria_hidden = criteria_cfg.get("hidden", criteria_hidden_dims)
+        criteria_activation = criteria_cfg.get("activation", "gelu")
+        criteria_drop = criteria_cfg.get("dropout", criteria_dropout)
+
+        evidence_hidden = evidence_cfg.get("hidden")
+        if isinstance(evidence_hidden, (list, tuple)):
+            default_evidence_layers = len(evidence_hidden) + 1
+        elif evidence_hidden is not None and "layers" not in evidence_cfg:
+            default_evidence_layers = 2
+        else:
+            default_evidence_layers = 1
+        evidence_layers = evidence_cfg.get("layers", default_evidence_layers)
+        evidence_activation = evidence_cfg.get("activation", "gelu")
+        evidence_drop = evidence_cfg.get("dropout", evidence_dropout)
+
+        self.pooler = SequencePooler(hidden_size, pooling=pooling)
+        self.criteria_head = ClassificationHead(
+            hidden_size,
+            num_labels=num_labels,
+            layers=criteria_layers,
+            hidden=criteria_hidden,
+            activation=criteria_activation,
+            dropout=criteria_drop,
+        )
+        self.evidence_head = SpanPredictionHead(
+            hidden_size,
+            layers=evidence_layers,
+            hidden=evidence_hidden,
+            activation=evidence_activation,
+            dropout=evidence_drop,
+        )
 
     def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        return_dict: bool = False,
-    ):
-        outputs = self.encoder(
+        self, *args: Any, **kwargs: Any
+    ) -> ShareOutput | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if args:
+            if isinstance(args[0], Mapping):
+                forwarded = dict(args[0])
+                forwarded.update(kwargs)
+                kwargs = forwarded
+            else:
+                raise TypeError(
+                    "Unexpected positional arguments passed to Model.forward"
+                )
+
+        return_dict = kwargs.pop("return_dict", True)
+        input_ids = kwargs.pop("input_ids", None)
+        attention_mask = kwargs.pop("attention_mask", None)
+        token_type_ids = kwargs.pop("token_type_ids", None)
+
+        encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             return_dict=True,
+            **kwargs,
         )
-        pooled_output = outputs.pooler_output
-        if pooled_output is None:
-            pooled_output = outputs.last_hidden_state[:, 0, :]
 
-        criteria_logits = self.criteria_head(pooled_output)
-        start_logits, end_logits = self.evidence_head(outputs.last_hidden_state)
+        pooled = self.pooler(
+            encoder_outputs.last_hidden_state,
+            attention_mask=attention_mask,
+            pooler_output=encoder_outputs.pooler_output,
+        )
+        criteria_logits = self.criteria_head(pooled)
+        start_logits, end_logits = self.evidence_head(encoder_outputs.last_hidden_state)
 
         if return_dict:
-            return {
-                "criteria_logits": criteria_logits,
-                "start_logits": start_logits,
-                "end_logits": end_logits,
-            }
+            return ShareOutput(
+                logits=criteria_logits,
+                start_logits=make_bool_safe(start_logits),
+                end_logits=make_bool_safe(end_logits),
+                hidden_states=encoder_outputs.hidden_states,
+                attentions=encoder_outputs.attentions,
+            )
         return criteria_logits, start_logits, end_logits

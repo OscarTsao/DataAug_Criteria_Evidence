@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -34,13 +34,13 @@ def get_best_model_path(filename: str = DEFAULT_FILENAME) -> str:
 def save_best_model(
     model: nn.Module,
     *,
-    tokenizer: Optional[PreTrainedTokenizerBase] = None,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    epoch: Optional[int] = None,
+    tokenizer: PreTrainedTokenizerBase | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
+    epoch: int | None = None,
     metric_name: str = "validation_f1",
-    metric_value: Optional[float] = None,
-    extra_state: Optional[dict[str, Any]] = None,
+    metric_value: float | None = None,
+    extra_state: dict[str, Any] | None = None,
     filename: str = DEFAULT_FILENAME,
 ) -> str:
     """Persist the model checkpoint under artifacts/criteria."""
@@ -62,8 +62,8 @@ def save_best_model(
 def load_best_model(
     model: nn.Module,
     *,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: Any | None = None,
     filename: str = DEFAULT_FILENAME,
 ) -> dict[str, Any]:
     """Load the best checkpoint weights into the provided modules."""

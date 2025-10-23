@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_TRACKING_URI = f"sqlite:///{(_ROOT / 'mlflow.db').resolve()}"
@@ -13,10 +14,10 @@ _DEFAULT_ARTIFACT_URI_STR = _DEFAULT_ARTIFACT_URI.as_uri()
 
 
 def configure_mlflow(
-    tracking_uri: Optional[str] = None,
-    experiment: Optional[str] = None,
-    tags: Optional[Dict[str, str]] = None,
-    artifact_location: Optional[str] = None,
+    tracking_uri: str | None = None,
+    experiment: str | None = None,
+    tags: dict[str, str] | None = None,
+    artifact_location: str | None = None,
 ) -> None:
     """Configure MLflow tracking URI, experiment, and default tags.
 
@@ -25,7 +26,9 @@ def configure_mlflow(
     """
     import mlflow
 
-    resolved_tracking_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", _DEFAULT_TRACKING_URI)
+    resolved_tracking_uri = tracking_uri or os.environ.get(
+        "MLFLOW_TRACKING_URI", _DEFAULT_TRACKING_URI
+    )
     resolved_artifact_uri = artifact_location or os.environ.get(
         "MLFLOW_ARTIFACT_URI", _DEFAULT_ARTIFACT_URI_STR
     )
@@ -39,7 +42,9 @@ def configure_mlflow(
         try:
             existing_experiment = mlflow.get_experiment_by_name(experiment)
             if existing_experiment is None:
-                mlflow.create_experiment(experiment, artifact_location=resolved_artifact_uri)
+                mlflow.create_experiment(
+                    experiment, artifact_location=resolved_artifact_uri
+                )
         except Exception:
             # Fall back to MLflow's internal handling if anything fails
             pass
@@ -73,7 +78,12 @@ def enable_autologging(enable: bool = True) -> None:
         pass
 
     # Fall back to common framework-specific autologging if present
-    for mod_name in ("mlflow.pytorch", "mlflow.sklearn", "mlflow.xgboost", "mlflow.lightgbm"):
+    for mod_name in (
+        "mlflow.pytorch",
+        "mlflow.sklearn",
+        "mlflow.xgboost",
+        "mlflow.lightgbm",
+    ):
         try:
             mod = __import__(mod_name, fromlist=["autolog"])  # type: ignore
             getattr(mod, "autolog")()
@@ -83,10 +93,10 @@ def enable_autologging(enable: bool = True) -> None:
 
 @contextlib.contextmanager
 def mlflow_run(
-    name: Optional[str] = None,
+    name: str | None = None,
     nested: bool = False,
-    tags: Optional[Dict[str, str]] = None,
-    params: Optional[Dict[str, Any]] = None,
+    tags: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> Iterator[Any]:
     """Context manager that starts and ends an MLflow run.
 

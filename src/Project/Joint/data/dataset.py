@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 DEFAULT_DATASET_PATH = (
-    Path(__file__).resolve().parents[4] / "data" / "processed" / "redsm5_matched_evidence.csv"
+    Path(__file__).resolve().parents[4]
+    / "data"
+    / "processed"
+    / "redsm5_matched_evidence.csv"
 )
 
 
-def _find_answer_span(context: str, answer: str) -> Tuple[int, int]:
+def _find_answer_span(context: str, answer: str) -> tuple[int, int]:
     answer = answer.strip()
     start_idx = context.find(answer)
     if start_idx == -1:
@@ -32,7 +35,7 @@ def _token_span_from_char(
     offsets: torch.Tensor,
     start_char: int,
     end_char: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     start_token = None
     end_token = None
     for idx, (token_start, token_end) in enumerate(offsets.tolist()):
@@ -53,9 +56,9 @@ class JointDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: Optional[Union[Path, str]] = None,
-        criteria_tokenizer: Optional[PreTrainedTokenizerBase] = None,
-        evidence_tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        csv_path: Path | str | None = None,
+        criteria_tokenizer: PreTrainedTokenizerBase | None = None,
+        evidence_tokenizer: PreTrainedTokenizerBase | None = None,
         criteria_tokenizer_name: str = "bert-base-uncased",
         evidence_tokenizer_name: str = "bert-base-uncased",
         sentence_column: str = "sentence_text",
@@ -74,8 +77,10 @@ class JointDataset(Dataset):
         with self.csv_path.open("r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             if reader.fieldnames is None:
-                raise ValueError(f"The dataset file {self.csv_path} is missing a header row.")
-            self.examples: List[Dict[str, str]] = [row for row in reader]
+                raise ValueError(
+                    f"The dataset file {self.csv_path} is missing a header row."
+                )
+            self.examples: list[dict[str, str]] = [row for row in reader]
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")
@@ -102,18 +107,22 @@ class JointDataset(Dataset):
         self.criteria_tokenizer = criteria_tokenizer or AutoTokenizer.from_pretrained(
             criteria_tokenizer_name
         )
-        if evidence_tokenizer is None and criteria_tokenizer_name == evidence_tokenizer_name:
+        if (
+            evidence_tokenizer is None
+            and criteria_tokenizer_name == evidence_tokenizer_name
+        ):
             # Reuse tokenizer instance when weights are expected to be shared.
             self.evidence_tokenizer = self.criteria_tokenizer
         else:
-            self.evidence_tokenizer = evidence_tokenizer or AutoTokenizer.from_pretrained(
-                evidence_tokenizer_name
+            self.evidence_tokenizer = (
+                evidence_tokenizer
+                or AutoTokenizer.from_pretrained(evidence_tokenizer_name)
             )
 
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         example = self.examples[index]
         sentence = example[self.sentence_column]
         context = example[self.context_column]
@@ -140,7 +149,7 @@ class JointDataset(Dataset):
         offsets = evidence_encoded.pop("offset_mapping").squeeze(0)
         start_token, end_token = _token_span_from_char(offsets, start_char, end_char)
 
-        item: Dict[str, torch.Tensor] = {}
+        item: dict[str, torch.Tensor] = {}
 
         for key, value in criteria_encoded.items():
             item[f"criteria_{key}"] = value.squeeze(0)
@@ -155,9 +164,9 @@ class JointDataset(Dataset):
 
 
 def load_joint_dataset(
-    splits: Optional[Sequence[float]] = None,
+    splits: Sequence[float] | None = None,
     **dataset_kwargs,
-) -> Union[JointDataset, Tuple[Dataset, ...]]:
+) -> JointDataset | tuple[Dataset, ...]:
     dataset: JointDataset = JointDataset(**dataset_kwargs)
     if not splits:
         return dataset

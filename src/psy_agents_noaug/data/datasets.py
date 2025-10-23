@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 import torch
@@ -31,7 +31,7 @@ class ClassificationDataset(Dataset):
         tokenizer: PreTrainedTokenizerBase,
         max_length: int,
         text_column: str,
-        text_pair_column: Optional[str] = None,
+        text_pair_column: str | None = None,
         label_column: str = "label",
         label_dtype: str = "int",
     ) -> None:
@@ -89,8 +89,8 @@ class ClassificationDataset(Dataset):
     def __len__(self) -> int:
         return self.labels.size(0)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        item: Dict[str, object] = {
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        item: dict[str, object] = {
             "input_ids": self.input_ids[idx],
             "attention_mask": self.attention_mask[idx],
             "labels": self.labels[idx],
@@ -108,9 +108,9 @@ class ClassificationDataset(Dataset):
         return item  # type: ignore[return-value]
 
 
-def load_splits(splits_path: Path) -> Dict[str, List[str]]:
+def load_splits(splits_path: Path) -> dict[str, list[str]]:
     """Load train/val/test splits from JSON file."""
-    with open(splits_path, "r", encoding="utf-8") as f:
+    with open(splits_path, encoding="utf-8") as f:
         data = json.load(f)
 
     return {
@@ -122,9 +122,9 @@ def load_splits(splits_path: Path) -> Dict[str, List[str]]:
 
 def build_criterion_mappings(
     dsm_entries: Sequence[Mapping[str, str]],
-) -> Tuple[Dict[str, str], Dict[str, int], Dict[int, str]]:
+) -> tuple[dict[str, str], dict[str, int], dict[int, str]]:
     """Construct mapping dictionaries for DSM criteria."""
-    criterion_text_map: Dict[str, str] = {}
+    criterion_text_map: dict[str, str] = {}
     for entry in dsm_entries:
         identifier = str(entry["id"])
         criterion_text_map[identifier] = entry.get("text", "")
@@ -136,7 +136,9 @@ def build_criterion_mappings(
     return criterion_text_map, criterion_to_index, index_to_criterion
 
 
-def rename_post_columns(posts: pd.DataFrame, field_map: Mapping[str, str]) -> pd.DataFrame:
+def rename_post_columns(
+    posts: pd.DataFrame, field_map: Mapping[str, str]
+) -> pd.DataFrame:
     """Rename post dataframe columns to canonical names."""
     renamed = posts.rename(
         columns={
@@ -178,9 +180,7 @@ def prepare_evidence_dataframe(
 ) -> pd.DataFrame:
     """Create dataframe for evidence presence classification."""
     base_pairs = (
-        criteria_groundtruth[["post_id", "criterion_id"]]
-        .drop_duplicates()
-        .copy()
+        criteria_groundtruth[["post_id", "criterion_id"]].drop_duplicates().copy()
     )
 
     positive_pairs = (
@@ -191,17 +191,14 @@ def prepare_evidence_dataframe(
 
     aggregated_evidence = {}
     if "evidence_text" in evidence_groundtruth.columns:
-        grouped = (
-            evidence_groundtruth.dropna(subset=["evidence_text"])
-            .groupby(["post_id", "criterion_id"])["evidence_text"]
-        )
+        grouped = evidence_groundtruth.dropna(subset=["evidence_text"]).groupby(
+            ["post_id", "criterion_id"]
+        )["evidence_text"]
         aggregated_evidence = grouped.apply(
             lambda texts: " ".join(str(t) for t in texts if isinstance(t, str))
         ).to_dict()
 
-    df = base_pairs.merge(
-        positive_pairs, on=["post_id", "criterion_id"], how="left"
-    )
+    df = base_pairs.merge(positive_pairs, on=["post_id", "criterion_id"], how="left")
     df["label"] = df["label"].fillna(0).astype(int)
     df = df[df["post_id"].isin(split_post_ids)].copy()
 
@@ -231,7 +228,7 @@ def build_datasets(
     criteria_groundtruth: pd.DataFrame,
     evidence_groundtruth: pd.DataFrame,
     splits: Mapping[str, Sequence[str]],
-) -> Tuple[DatasetSplits, Dict[str, int], Dict[int, str]]:
+) -> tuple[DatasetSplits, dict[str, int], dict[int, str]]:
     """Build tokenized datasets for the requested task."""
     posts = rename_post_columns(posts_df, field_map["posts"])
     post_text_map = posts.set_index("post_id")["post_text"].to_dict()
@@ -242,13 +239,25 @@ def build_datasets(
 
     if task_name == "criteria":
         train_df = prepare_criteria_dataframe(
-            criteria_groundtruth, post_text_map, criterion_text_map, criterion_to_index, splits["train"]
+            criteria_groundtruth,
+            post_text_map,
+            criterion_text_map,
+            criterion_to_index,
+            splits["train"],
         )
         val_df = prepare_criteria_dataframe(
-            criteria_groundtruth, post_text_map, criterion_text_map, criterion_to_index, splits["val"]
+            criteria_groundtruth,
+            post_text_map,
+            criterion_text_map,
+            criterion_to_index,
+            splits["val"],
         )
         test_df = prepare_criteria_dataframe(
-            criteria_groundtruth, post_text_map, criterion_text_map, criterion_to_index, splits["test"]
+            criteria_groundtruth,
+            post_text_map,
+            criterion_text_map,
+            criterion_to_index,
+            splits["test"],
         )
 
         datasets = DatasetSplits(

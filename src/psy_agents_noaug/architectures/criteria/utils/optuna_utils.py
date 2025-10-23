@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import optuna
 
@@ -9,7 +9,7 @@ _ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_STORAGE_URI = f"sqlite:///{(_ROOT / 'optuna.db').resolve()}"
 
 
-def get_optuna_storage(storage: Optional[str] = None) -> str:
+def get_optuna_storage(storage: str | None = None) -> str:
     """Return the storage URI, defaulting to the repository-level SQLite DB."""
     uri = storage or _DEFAULT_STORAGE_URI
     if uri.startswith("sqlite:///"):
@@ -20,11 +20,11 @@ def get_optuna_storage(storage: Optional[str] = None) -> str:
 
 def create_study(
     study_name: str,
-    storage: Optional[str] = None,
+    storage: str | None = None,
     direction: str = "minimize",
     load_if_exists: bool = True,
-    sampler: Optional[optuna.samplers.BaseSampler] = None,
-    pruner: Optional[optuna.pruners.BasePruner] = None,
+    sampler: optuna.samplers.BaseSampler | None = None,
+    pruner: optuna.pruners.BasePruner | None = None,
     **kwargs: Any,
 ) -> optuna.Study:
     """Create (or reuse) an Optuna study backed by the shared SQLite DB."""
@@ -40,7 +40,7 @@ def create_study(
     )
 
 
-def load_study(study_name: str, storage: Optional[str] = None) -> optuna.Study:
+def load_study(study_name: str, storage: str | None = None) -> optuna.Study:
     """Load an existing Optuna study from the shared SQLite DB."""
     storage_uri = get_optuna_storage(storage)
     return optuna.load_study(study_name=study_name, storage=storage_uri)

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+from collections.abc import Iterable
+from functools import cache
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Union
 
 DEFAULT_DSM_CRITERIA_PATH = (
     Path(__file__).resolve().parents[4]
@@ -16,8 +16,8 @@ DEFAULT_DSM_CRITERIA_PATH = (
 )
 
 
-@lru_cache(maxsize=None)
-def _load_raw_criteria(path: Union[str, Path]) -> Iterable[Dict[str, str]]:
+@cache
+def _load_raw_criteria(path: str | Path) -> Iterable[dict[str, str]]:
     """Load raw criteria entries from JSON."""
     json_path = Path(path)
     if not json_path.is_file():
@@ -37,10 +37,12 @@ def _load_raw_criteria(path: Union[str, Path]) -> Iterable[Dict[str, str]]:
         yield entry
 
 
-@lru_cache(maxsize=None)
-def build_criterion_text_map(path: Union[str, Path] = DEFAULT_DSM_CRITERIA_PATH) -> Dict[str, str]:
+@cache
+def build_criterion_text_map(
+    path: str | Path = DEFAULT_DSM_CRITERIA_PATH,
+) -> dict[str, str]:
     """Return a mapping from criterion identifier to its descriptive text."""
-    mapping: Dict[str, str] = {}
+    mapping: dict[str, str] = {}
     for entry in _load_raw_criteria(path):
         identifier = str(entry["id"]).strip()
         text = str(entry.get("text", "")).strip()
@@ -57,10 +59,10 @@ def build_criterion_text_map(path: Union[str, Path] = DEFAULT_DSM_CRITERIA_PATH)
 
 
 def resolve_criterion_text(
-    criterion_id: Union[str, int],
-    mapping: Dict[str, str],
+    criterion_id: str | int,
+    mapping: dict[str, str],
     *,
-    fallback: Optional[str] = None,
+    fallback: str | None = None,
 ) -> str:
     """Resolve criterion identifier to descriptive text.
 
