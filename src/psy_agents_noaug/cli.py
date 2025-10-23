@@ -107,6 +107,41 @@ def show_best(
         typer.echo(f"[{i}] value={val:.4f}  params={json.dumps(params)[:500]}...")
 
 
+@app.command("tune-supermax")
+def tune_supermax(
+    agent: str = typer.Option(..., help="criteria|evidence|share|joint"),
+    study: str = typer.Option(...),
+    n_trials: int = typer.Option(5000, help="Very large default; override as needed"),
+    parallel: int = typer.Option(4),
+    outdir: str | None = typer.Option(None),
+    storage: str | None = typer.Option(None),
+):
+    """100-epoch trials with EarlyStopping(patience=20). Big n_trials by default."""
+    outdir = _default_outdir(outdir)
+    _ensure_mlflow(outdir)
+    storage = storage or f"sqlite:///{Path('./_optuna/noaug.db').absolute()}"
+    env = os.environ.copy()
+    env["HPO_EPOCHS"] = "100"
+    env["HPO_PATIENCE"] = "20"
+    cmd = [
+        "python",
+        "scripts/tune_max.py",
+        "--agent",
+        agent,
+        "--study",
+        study,
+        "--n-trials",
+        str(n_trials),
+        "--parallel",
+        str(parallel),
+        "--outdir",
+        outdir,
+        "--storage",
+        storage,
+    ]
+    subprocess.run(cmd, check=True, env=env)
+
+
 def main():
     app()
 

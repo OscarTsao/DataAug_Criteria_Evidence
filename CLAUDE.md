@@ -61,23 +61,41 @@ python scripts/train_criteria.py
 python scripts/eval_criteria.py checkpoint=outputs/checkpoints/best_checkpoint.pt
 ```
 
-### Hyperparameter Optimization (HPO)
+### Hyperparameter Optimization (HPO) 🚀 PRODUCTION READY
+
+**TWO HPO SYSTEMS** (both use real redsm5 data):
+
+**1. Multi-Stage HPO** (Progressive refinement):
 ```bash
-# Multi-stage HPO workflow
-make hpo-s0             # Stage 0: Sanity (2 trials)
-make hpo-s1             # Stage 1: Coarse (20 trials)
-make hpo-s2             # Stage 2: Fine (50 trials)
-make refit              # Stage 3: Refit on train+val
+# Single architecture (criteria, evidence, share, or joint)
+make hpo-s0 HPO_TASK=criteria    # Stage 0: Sanity (8 trials)
+make hpo-s1 HPO_TASK=criteria    # Stage 1: Coarse (20 trials)
+make hpo-s2 HPO_TASK=criteria    # Stage 2: Fine (50 trials)
+make refit HPO_TASK=criteria     # Stage 3: Refit on train+val
 
-# Or run all stages
-make full-hpo
+# Or run all stages for one architecture
+make full-hpo HPO_TASK=criteria
 
-# Use CLI for custom HPO
-python -m psy_agents_noaug.cli hpo \
-    hpo=stage1_coarse \
-    task=criteria \
-    model=roberta_base
+# Run ALL architectures sequentially
+make full-hpo-all
 ```
+
+**2. Maximal HPO** (Single large run, 600-1200 trials):
+```bash
+# Single architecture
+make tune-criteria-max    # 800 trials
+make tune-evidence-max    # 1200 trials
+make tune-share-max       # 600 trials
+make tune-joint-max       # 600 trials
+
+# Run ALL architectures sequentially
+make maximal-hpo-all
+
+# Or use wrapper script for custom settings
+python scripts/run_all_hpo.py --mode maximal --parallel 4
+```
+
+See `docs/HPO_GUIDE.md` for comprehensive documentation.
 
 ### Testing and Quality
 ```bash
@@ -165,10 +183,12 @@ Raw Data → Field Map Validation → Groundtruth Generation
 - Mixed precision support (Float16/BFloat16 with automatic GPU detection)
 
 **Training Scripts:**
-- `scripts/train_criteria.py`: Standalone Criteria training (PRODUCTION-READY)
-- `scripts/eval_criteria.py`: Standalone Criteria evaluation (PRODUCTION-READY)
+- `scripts/train_criteria.py`: Standalone Criteria training ✅ PRODUCTION-READY
+- `scripts/eval_criteria.py`: Standalone Criteria evaluation ✅ PRODUCTION-READY
 - `scripts/train_best.py`: HPO integration router (routes to architecture-specific scripts)
-- `scripts/run_hpo_stage.py`: HPO runner (objective function needs implementation)
+- `scripts/run_hpo_stage.py`: Multi-stage HPO runner ✅ REAL DATA
+- `scripts/tune_max.py`: Maximal HPO runner ✅ REAL DATA
+- `scripts/run_all_hpo.py`: Sequential HPO wrapper for all architectures ✅ NEW
 
 **Training Configs:**
 - `configs/training/default.yaml`: Standard settings with hardware optimizations
@@ -489,19 +509,28 @@ cat docs/QUICK_START.md         # Quick start guide
 
 ## Recent Updates (2025)
 
-**NEW Training Infrastructure:**
+**🚀 NEW: Production-Ready HPO System (January 2025):**
+- ✅ **Real data integration**: Both HPO systems connected to redsm5 dataset
+- ✅ **Multi-stage HPO**: Progressive refinement (8+20+50 trials)
+- ✅ **Maximal HPO**: Single large runs (600-1200 trials)
+- ✅ **Sequential wrapper**: `run_all_hpo.py` for all architectures
+- ✅ **Complete documentation**: `docs/HPO_GUIDE.md`
+- ❌ **NO synthetic data** - 100% production ready
+
+**Training Infrastructure:**
 - Enhanced reproducibility with full determinism support
 - Hardware-optimized DataLoader settings (2-5x faster)
 - Mixed precision (AMP) with Float16/BFloat16 auto-detection
 - Production-ready Criteria training/evaluation scripts
 - Comprehensive training documentation
 
-**Project Optimization (Latest):**
+**Project Optimization:**
 - Removed 3 redundant documentation files (-985 lines)
 - Unified Docker config (`.devcontainer/` only)
 - Cleaned all cache files
 - Verified no unused imports (ruff check)
 - Documented architecture implementation status
 
-See `OPTIMIZATION_SUMMARY.md` for full cleanup details.
+See `docs/HPO_GUIDE.md` for HPO system details.
 See `docs/TRAINING_GUIDE.md` and `docs/TRAINING_SETUP_COMPLETE.md` for training details.
+See `OPTIMIZATION_SUMMARY.md` for full cleanup details.

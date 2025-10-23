@@ -10,17 +10,18 @@
 # INTEGRATION: Implement `run_training_eval(cfg, callbacks)` to call your trainer once/epoch,
 # reporting metrics to the provided callbacks and returning the final metric dict.
 
-import os
-import json
 import argparse
-import time
+import json
+import os
 import random
-from typing import Any, Callable, Dict, Optional
+import time
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import optuna
+from optuna.pruners import HyperbandPruner, PatientPruner
 from optuna.samplers import NSGAIISampler, TPESampler
-from optuna.pruners import HyperbandPruner, PercentilePruner, PatientPruner
 
 try:
     import mlflow
@@ -41,6 +42,34 @@ def set_seeds(seed: int):
     torch.backends.cudnn.benchmark = True
 
 
+# ----------------------------
+# EarlyStopping helper (patience-based)
+# ----------------------------
+class EarlyStopping:
+    def __init__(self, patience: int = 20, min_delta: float = 0.0, mode: str = "max"):
+        self.patience = int(patience)
+        self.min_delta = float(min_delta)
+        self.mode = mode
+        self.best = None
+        self.bad_epochs = 0
+
+    def improved(self, value: float) -> bool:
+        if self.best is None:
+            return True
+        if self.mode == "max":
+            return value > self.best + self.min_delta
+        else:
+            return value < self.best - self.min_delta
+
+    def step(self, value: float) -> bool:
+        if self.improved(value):
+            self.best = value
+            self.bad_epochs = 0
+            return False
+        self.bad_epochs += 1
+        return self.bad_epochs >= self.patience
+
+
 def default_mlflow_setup(outdir: str):
     if not _HAS_MLFLOW:
         return
@@ -50,7 +79,9 @@ def default_mlflow_setup(outdir: str):
     mlflow.set_experiment("NoAug_Criteria_Evidence")
 
 
-def on_epoch(trial: optuna.Trial, step: int, metric: float, secondary: Optional[float] = None):
+def on_epoch(
+    trial: optuna.Trial, step: int, metric: float, secondary: float | None = None
+):
     trial.report(metric, step=step)
     if secondary is not None:
         trial.set_user_attr(f"secondary_epoch_{step}", float(secondary))
@@ -58,17 +89,23 @@ def on_epoch(trial: optuna.Trial, step: int, metric: float, secondary: Optional[
         raise optuna.TrialPruned(f"Pruned at step {step} with metric {metric:.4f}")
 
 
-MODEL_CHOICES = [
-    "bert-base-uncased",
-    "bert-large-uncased",
-    "roberta-base",
-    "roberta-large",
-    "microsoft/deberta-v3-base",
-    "microsoft/deberta-v3-large",
-    "google/electra-base-discriminator",
-    "google/electra-large-discriminator",
-    "xlm-roberta-base",
-]
+# Optional narrowing via env for hybrid flows
+_raw_models = os.environ.get("HPO_MODEL_CHOICES")
+MODEL_CHOICES = (
+    [m.strip() for m in _raw_models.split(",")]
+    if _raw_models
+    else [
+        "bert-base-uncased",
+        "bert-large-uncased",
+        "roberta-base",
+        "roberta-large",
+        "microsoft/deberta-v3-base",
+        "microsoft/deberta-v3-large",
+        "google/electra-base-discriminator",
+        "google/electra-large-discriminator",
+        "xlm-roberta-base",
+    ]
+)
 
 SCHEDULERS = ["linear", "cosine", "cosine_restart", "polynomial", "one_cycle"]
 OPTIMS = ["adamw", "adamw_8bit", "adafactor", "lion"]
@@ -81,8 +118,11 @@ LOSSES_QA = ["qa_ce", "qa_ce_ls", "qa_focal"]
 NULL_POLICIES = ["none", "threshold", "ratio", "calibrated"]
 RERANKERS = ["sum", "product", "softmax"]
 
+# Optional head narrowing via env JSON (for hybrid trust-region)
+_HEAD_LIMITS = json.loads(os.environ.get("HPO_HEAD_LIMITS_JSON", "{}"))
 
-def suggest_common(trial: optuna.Trial, heavy_model: bool) -> Dict[str, Any]:
+
+def suggest_common(trial: optuna.Trial, heavy_model: bool) -> dict[str, Any]:
     max_len = trial.suggest_int("tok.max_length", 128, 1024, step=32)
     stride = trial.suggest_int("tok.doc_stride", 32, min(256, max_len // 2), step=16)
     fast_tok = trial.suggest_categorical("tok.use_fast", [True, False])
@@ -115,7 +155,9 @@ def suggest_common(trial: optuna.Trial, heavy_model: bool) -> Dict[str, Any]:
         else None
     )
     poly_power = (
-        trial.suggest_float("sched.poly_power", 0.5, 2.0) if sched == "polynomial" else None
+        trial.suggest_float("sched.poly_power", 0.5, 2.0)
+        if sched == "polynomial"
+        else None
     )
 
     clip = trial.suggest_float("train.clip_grad", 0.0, 1.5)
@@ -155,26 +197,39 @@ def suggest_common(trial: optuna.Trial, heavy_model: bool) -> Dict[str, Any]:
     }
 
 
-def suggest_criteria(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
+def suggest_criteria(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     heavy = any(k in model_name for k in ["-large", "large", "xlm-roberta"])
     com = suggest_common(trial, heavy)
     pooling = trial.suggest_categorical("head.pooling", POOLING)
-    head_layers = trial.suggest_int("head.layers", 1, 4)
+    head_layers = trial.suggest_int(
+        "head.layers",
+        int(_HEAD_LIMITS.get("layers_min", 1)),
+        int(_HEAD_LIMITS.get("layers_max", 4)),
+    )
     head_hidden = trial.suggest_categorical(
-        "head.hidden", [256, 384, 512, 768, 1024, 1536, 2048]
+        "head.hidden",
+        _HEAD_LIMITS.get("hidden_choices", [256, 384, 512, 768, 1024, 1536, 2048]),
     )
     head_act = trial.suggest_categorical("head.activation", ACTS)
-    head_do = trial.suggest_float("head.dropout", 0.0, 0.5)
+    head_do = trial.suggest_float(
+        "head.dropout", 0.0, float(_HEAD_LIMITS.get("dropout_max", 0.5))
+    )
     loss = trial.suggest_categorical("loss.cls.type", LOSSES_CLS)
     label_smooth = (
-        trial.suggest_float("loss.cls.label_smoothing", 0.0, 0.20) if loss != "focal" else 0.0
+        trial.suggest_float("loss.cls.label_smoothing", 0.0, 0.20)
+        if loss != "focal"
+        else 0.0
     )
-    focal_gamma = trial.suggest_float("loss.cls.gamma", 1.0, 5.0) if loss == "focal" else None
-    focal_alpha = trial.suggest_float("loss.cls.alpha", 0.1, 0.9) if loss == "focal" else None
+    focal_gamma = (
+        trial.suggest_float("loss.cls.gamma", 1.0, 5.0) if loss == "focal" else None
+    )
+    focal_alpha = (
+        trial.suggest_float("loss.cls.alpha", 0.1, 0.9) if loss == "focal" else None
+    )
     class_balance = trial.suggest_categorical(
         "loss.cls.balance", ["none", "weighted", "effective_num"]
     )
-    epochs = int(os.getenv("HPO_EPOCHS", "6"))
+    epochs = int(os.getenv("HPO_EPOCHS", "100"))
     return {
         "task": "criteria",
         "model": {"name": model_name},
@@ -197,19 +252,34 @@ def suggest_criteria(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     }
 
 
-def suggest_evidence(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
+def suggest_evidence(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     heavy = any(k in model_name for k in ["-large", "large", "xlm-roberta"])
     com = suggest_common(trial, heavy)
-    head_layers = trial.suggest_int("head.layers", 1, 4)
-    head_hidden = trial.suggest_categorical("head.hidden", [256, 384, 512, 768, 1024, 1536])
+    head_layers = trial.suggest_int(
+        "head.layers",
+        int(_HEAD_LIMITS.get("layers_min", 1)),
+        int(_HEAD_LIMITS.get("layers_max", 4)),
+    )
+    head_hidden = trial.suggest_categorical(
+        "head.hidden",
+        _HEAD_LIMITS.get("hidden_choices", [256, 384, 512, 768, 1024, 1536, 2048]),
+    )
     head_act = trial.suggest_categorical("head.activation", ACTS)
-    head_do = trial.suggest_float("head.dropout", 0.0, 0.5)
+    head_do = trial.suggest_float(
+        "head.dropout", 0.0, float(_HEAD_LIMITS.get("dropout_max", 0.5))
+    )
     loss = trial.suggest_categorical("loss.qa.type", LOSSES_QA)
     label_smooth = (
-        trial.suggest_float("loss.qa.label_smoothing", 0.0, 0.15) if loss != "qa_focal" else 0.0
+        trial.suggest_float("loss.qa.label_smoothing", 0.0, 0.15)
+        if loss != "qa_focal"
+        else 0.0
     )
-    focal_gamma = trial.suggest_float("loss.qa.gamma", 1.0, 5.0) if loss == "qa_focal" else None
-    focal_alpha = trial.suggest_float("loss.qa.alpha", 0.1, 0.9) if loss == "qa_focal" else None
+    focal_gamma = (
+        trial.suggest_float("loss.qa.gamma", 1.0, 5.0) if loss == "qa_focal" else None
+    )
+    focal_alpha = (
+        trial.suggest_float("loss.qa.alpha", 0.1, 0.9) if loss == "qa_focal" else None
+    )
     null_pol = trial.suggest_categorical("qa.null.policy", NULL_POLICIES)
     null_threshold = (
         trial.suggest_float("qa.null.threshold", -5.0, 5.0)
@@ -225,7 +295,7 @@ def suggest_evidence(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     rerank = trial.suggest_categorical("qa.reranker", RERANKERS)
     nms_iou = trial.suggest_float("qa.nms_iou", 0.3, 0.8)
     neg_ratio = trial.suggest_float("qa.neg_ratio", 0.1, 1.0)
-    epochs = int(os.getenv("HPO_EPOCHS", "6"))
+    epochs = int(os.getenv("HPO_EPOCHS", "100"))
     return {
         "task": "evidence",
         "model": {"name": model_name},
@@ -259,7 +329,7 @@ def suggest_evidence(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     }
 
 
-def suggest_joint(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
+def suggest_joint(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     cfg_e = suggest_evidence(trial, model_name)
     cfg_c = suggest_criteria(trial, model_name)
     share_ratio = trial.suggest_float("joint.share_ratio", 0.0, 1.0)
@@ -279,7 +349,7 @@ def suggest_joint(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     return cfg
 
 
-def build_config(trial: optuna.Trial, agent: str) -> Dict[str, Any]:
+def build_config(trial: optuna.Trial, agent: str) -> dict[str, Any]:
     model = trial.suggest_categorical("model.name", MODEL_CHOICES)
     if agent == "criteria":
         return suggest_criteria(trial, model)
@@ -294,15 +364,13 @@ def build_config(trial: optuna.Trial, agent: str) -> Dict[str, Any]:
 
 
 def run_training_eval(
-    cfg: Dict[str, Any],
-    callbacks: Dict[str, Callable[[int, float, Optional[float]], None]],
-) -> Dict[str, float]:
+    cfg: dict[str, Any],
+    callbacks: dict[str, Callable[[int, float, float | None], None]],
+) -> dict[str, float]:
     """
-    Training bridge for HPO integration.
+    Training bridge for HPO integration with REAL redsm5 data and EarlyStopping.
 
-    Creates a minimal training setup, runs epochs, and reports metrics.
-    For production HPO, this should use real data and full training.
-    For smoke tests, this uses synthetic data for quick validation.
+    Loads real redsm5 dataset, trains the model with EarlyStopping, and reports metrics.
 
     Args:
         cfg: Configuration dict with model, head, train, optim, etc.
@@ -311,46 +379,104 @@ def run_training_eval(
     Returns:
         Dict with "primary" metric and "runtime_s"
     """
+    import sys
+    from pathlib import Path
+
     import torch
     import torch.nn as nn
-    from torch.utils.data import TensorDataset, DataLoader
+    from torch.utils.data import DataLoader, random_split
+    from transformers import AutoTokenizer
+
+    # Add src to path
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from Project.Criteria.data.dataset import CriteriaDataset
+    from Project.Criteria.models.model import Model as CriteriaModel
+    from Project.Evidence.data.dataset import EvidenceDataset
 
     epochs = cfg["train"]["epochs"]
     batch_size = cfg["train"]["batch_size"]
     task = cfg.get("task", "criteria")
+    model_name = cfg["model"]["name"]
+
+    # EarlyStopping config from environment
+    patience = int(os.getenv("HPO_PATIENCE", "20"))
+    min_delta = float(os.getenv("HPO_MIN_DELTA", "0.0"))
+    es = EarlyStopping(patience=patience, min_delta=min_delta, mode="max")
 
     # Detect device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Create synthetic data for smoke testing
-    # For production, replace with real data loading
-    n_samples = 100
-    seq_len = 128
-    vocab_size = 30522  # BERT vocab size
-    num_labels = 2 if task in ("criteria", "share", "joint") else 1
+    # Load real dataset based on task
+    project_root = Path(__file__).parent.parent
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # Generate random inputs
-    input_ids = torch.randint(0, vocab_size, (n_samples, seq_len))
-    attention_mask = torch.ones(n_samples, seq_len)
-    labels = torch.randint(0, num_labels, (n_samples,))
+    if task in ("criteria", "share", "joint"):
+        dataset_path = project_root / "data" / "redsm5" / "redsm5_annotations.csv"
+        dataset = CriteriaDataset(
+            csv_path=dataset_path,
+            tokenizer=tokenizer,
+            max_length=cfg["tok"]["max_length"],
+        )
+        num_labels = 2
+    elif task == "evidence":
+        dataset_path = (
+            project_root / "data" / "processed" / "redsm5_matched_evidence.csv"
+        )
+        dataset = EvidenceDataset(
+            csv_path=dataset_path,
+            tokenizer=tokenizer,
+            max_length=cfg["tok"]["max_length"],
+        )
+        num_labels = 2
+    else:
+        raise ValueError(f"Unknown task: {task}")
 
-    # Create dataset and dataloader
-    dataset = TensorDataset(input_ids, attention_mask, labels)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # Split dataset (80/10/10) - train/val/test
+    train_size = int(0.8 * len(dataset))
+    val_size = int(0.1 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
 
-    # Create simple model (just embedding + linear for speed)
-    class SimpleModel(nn.Module):
-        def __init__(self, vocab_size, hidden_dim, num_labels):
-            super().__init__()
-            self.embedding = nn.Embedding(vocab_size, hidden_dim)
-            self.classifier = nn.Linear(hidden_dim, num_labels)
+    generator = torch.Generator().manual_seed(cfg["meta"]["seed"])
+    train_dataset, val_dataset, test_dataset = random_split(
+        dataset, [train_size, val_size, test_size], generator=generator
+    )
 
-        def forward(self, input_ids, attention_mask):
-            embeds = self.embedding(input_ids)
-            pooled = embeds.mean(dim=1)
-            return self.classifier(pooled)
+    # Create dataloaders
+    num_workers = (
+        min(4, torch.cuda.device_count() * 2) if torch.cuda.is_available() else 2
+    )
 
-    model = SimpleModel(vocab_size, 128, num_labels).to(device)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True if torch.cuda.is_available() else False,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True if torch.cuda.is_available() else False,
+    )
+
+    # Create model based on task
+    if task in ("criteria", "share", "joint"):
+        model = CriteriaModel(
+            model_name=model_name,
+            num_labels=num_labels,
+            dropout=cfg["regularization"]["dropout"],
+        ).to(device)
+    elif task == "evidence":
+        model = CriteriaModel(
+            model_name=model_name,
+            num_labels=num_labels,
+            dropout=cfg["regularization"]["dropout"],
+        ).to(device)
+
     criterion = nn.CrossEntropyLoss()
 
     # Create optimizer based on config
@@ -364,65 +490,79 @@ def run_training_eval(
             lr=lr,
             weight_decay=wd,
             betas=(cfg["optim"].get("beta1", 0.9), cfg["optim"].get("beta2", 0.999)),
-            eps=cfg["optim"].get("eps", 1e-8)
+            eps=cfg["optim"].get("eps", 1e-8),
         )
     elif optim_name in ("adamw_8bit", "lion"):
-        # Fallback to AdamW for simplicity
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     elif optim_name == "adafactor":
-        # Fallback to AdamW for simplicity
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 
-    # Training loop
+    # Training loop with EarlyStopping
     start = time.time()
     best = 0.0
 
     for epoch in range(epochs):
+        # Training
         model.train()
         total_loss = 0.0
-        correct = 0
-        total = 0
 
-        for batch_input_ids, batch_mask, batch_labels in loader:
-            batch_input_ids = batch_input_ids.to(device)
-            batch_mask = batch_mask.to(device)
-            batch_labels = batch_labels.to(device)
+        for batch in train_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
 
             optimizer.zero_grad()
-            logits = model(batch_input_ids, batch_mask)
-            loss = criterion(logits, batch_labels)
+            logits = model(input_ids, attention_mask)
+            loss = criterion(logits, labels)
             loss.backward()
 
-            # Apply gradient clipping if specified
             if cfg["train"].get("clip_grad", 0.0) > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["train"]["clip_grad"])
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), cfg["train"]["clip_grad"]
+                )
 
             optimizer.step()
-
             total_loss += loss.item()
-            preds = logits.argmax(dim=1)
-            correct += (preds == batch_labels).sum().item()
-            total += batch_labels.size(0)
 
-        # Calculate epoch metrics
-        avg_loss = total_loss / len(loader)
-        accuracy = correct / total
+        # Validation
+        model.eval()
+        all_preds = []
+        all_labels = []
+        val_loss = 0.0
 
-        # For F1, use accuracy as proxy (real implementation should compute F1)
-        # Add some variance based on config quality to simulate real training
-        head_quality = 0.1 * (cfg["head"].get("layers", 1) / 4.0)  # Deeper heads slightly better
-        dropout_penalty = -0.05 * cfg["head"].get("dropout", 0.1)  # Too much dropout hurts
-        lr_quality = 0.05 if 1e-5 < lr < 1e-4 else -0.05  # Reward good LR range
+        with torch.no_grad():
+            for batch in val_loader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                labels = batch["labels"].to(device)
 
-        metric = accuracy + head_quality + dropout_penalty + lr_quality
-        metric = max(0.5, min(0.95, metric))  # Clamp to realistic range
+                logits = model(input_ids, attention_mask)
+                loss = criterion(logits, labels)
+                val_loss += loss.item()
 
+                preds = logits.argmax(dim=1)
+                all_preds.extend(preds.cpu().tolist())
+                all_labels.extend(labels.cpu().tolist())
+
+        # Calculate metrics
+        from sklearn.metrics import f1_score
+
+        avg_val_loss = val_loss / len(val_loader)
+        val_f1 = f1_score(all_labels, all_preds, average="macro")
+
+        # Use F1 as primary metric
+        metric = val_f1
         best = max(best, metric)
 
         # Report to Optuna
-        callbacks["on_epoch"](epoch, metric, avg_loss)
+        callbacks["on_epoch"](epoch, metric, avg_val_loss)
+
+        # Check EarlyStopping
+        if es.step(metric):
+            print(f"EarlyStopping triggered at epoch {epoch+1} (patience={patience})")
+            break
 
     runtime = time.time() - start
     return {"primary": float(best), "runtime_s": runtime}
@@ -431,10 +571,9 @@ def run_training_eval(
 def make_pruner() -> optuna.pruners.BasePruner:
     hb = HyperbandPruner(
         min_resource=1,
-        max_resource=int(os.getenv("HPO_EPOCHS", "6")),
+        max_resource=int(os.getenv("HPO_EPOCHS", "100")),
         reduction_factor=3,
     )
-    pct = PercentilePruner(50.0, n_startup_trials=30, n_warmup_steps=1, interval_steps=1)
     return PatientPruner(hb, patience=2)
 
 
@@ -483,7 +622,9 @@ def objective_builder(
     return _obj
 
 
-def flatten_dict(d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
+def flatten_dict(
+    d: dict[str, Any], parent_key: str = "", sep: str = "."
+) -> dict[str, Any]:
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -495,7 +636,7 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dic
 
 
 def is_loggable(v: Any) -> bool:
-    return isinstance(v, (str, int, float, bool)) or v is None
+    return isinstance(v, str | int | float | bool) or v is None
 
 
 def main():
@@ -529,7 +670,7 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     default_mlflow_setup(args.outdir)
 
-    epochs = int(os.getenv("HPO_EPOCHS", "6"))
+    epochs = int(os.getenv("HPO_EPOCHS", "100"))
     print(f"[HPO] agent={args.agent} epochs={epochs} storage={args.storage}")
 
     sampler = make_sampler(args.multi_objective, seed=2025)
@@ -537,7 +678,9 @@ def main():
 
     study = optuna.create_study(
         study_name=args.study,
-        directions=["maximize"] if not args.multi_objective else ["maximize", "minimize"],
+        directions=(
+            ["maximize"] if not args.multi_objective else ["maximize", "minimize"]
+        ),
         storage=args.storage,
         load_if_exists=True,
         sampler=sampler,
@@ -564,9 +707,13 @@ def main():
     top_limit = min(8, len(study.best_trials))
     topk = []
     for trial in study.best_trials[:top_limit]:
-        val = getattr(trial, "value", trial.values[0] if hasattr(trial, "values") else None)
+        val = getattr(
+            trial, "value", trial.values[0] if hasattr(trial, "values") else None
+        )
         topk.append({"value": val, "params": trial.params})
-    with open(os.path.join(args.outdir, f"{args.agent}_{args.study}_topk.json"), "w") as fh:
+    with open(
+        os.path.join(args.outdir, f"{args.agent}_{args.study}_topk.json"), "w"
+    ) as fh:
         json.dump(topk, fh, indent=2)
 
 

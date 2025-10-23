@@ -5935,4 +5935,4 @@ dev = ["black", "mypy", "pytest", "pytest-cov", "ruff"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "3ba0e36ddefb7421d325851dfcdfc393eb72542c0ed2125e74dfedd8841d4cb2"
+content-hash = "db80b0f3878674ee57b7aee719c5216bb81d7cbdc04e06a843198af51e46731d"

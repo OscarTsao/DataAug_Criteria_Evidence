@@ -4,6 +4,7 @@
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-share-max tune-joint-max
+.PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 
 # Default target
 .DEFAULT_GOAL := help
@@ -38,10 +39,17 @@ help:
 	@echo "  make train TASK=<task> MODEL=<model> - Train with custom task/model"
 	@echo ""
 	@echo "$(GREEN)Hyperparameter Optimization (HPO):$(NC)"
-	@echo "  make hpo-s0             - Stage 0: Sanity check (2 trials)"
+	@echo "  make hpo-s0             - Stage 0: Sanity check (8 trials)"
 	@echo "  make hpo-s1             - Stage 1: Coarse search (20 trials)"
 	@echo "  make hpo-s2             - Stage 2: Fine search (50 trials)"
 	@echo "  make refit              - Stage 3: Refit best model on train+val"
+	@echo "  make full-hpo-all       - Multi-stage HPO for ALL architectures"
+	@echo "  make maximal-hpo-all    - Maximal HPO for ALL architectures"
+	@echo "  make tune-criteria-supermax  - Super-max HPO: criteria (5000 trials, 100 epochs)"
+	@echo "  make tune-evidence-supermax  - Super-max HPO: evidence (8000 trials, 100 epochs)"
+	@echo "  make tune-share-supermax     - Super-max HPO: share (3000 trials, 100 epochs)"
+	@echo "  make tune-joint-supermax     - Super-max HPO: joint (3000 trials, 100 epochs)"
+	@echo "  make tune-all-supermax       - Super-max HPO: ALL architectures sequentially (~19K trials)"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -281,9 +289,19 @@ quick-start: setup groundtruth hpo-s0
 	@echo "  - Train model: make train"
 	@echo "  - Evaluate: make eval"
 
-## full-hpo: Run complete HPO pipeline (stages 0-3)
+## full-hpo: Run complete HPO pipeline (stages 0-3) for one architecture
 full-hpo: hpo-s0 hpo-s1 hpo-s2 refit
 	@echo "$(GREEN)✓ Full HPO pipeline complete!$(NC)"
+
+## full-hpo-all: Run complete HPO pipeline for ALL architectures sequentially
+full-hpo-all:
+	@echo "$(BLUE)Running multi-stage HPO for all architectures...$(NC)"
+	poetry run python scripts/run_all_hpo.py --mode multistage
+
+## maximal-hpo-all: Run maximal HPO for ALL architectures sequentially
+maximal-hpo-all:
+	@echo "$(BLUE)Running maximal HPO for all architectures...$(NC)"
+	poetry run python scripts/run_all_hpo.py --mode maximal
 
 #==============================================================================
 # Info
@@ -325,3 +343,92 @@ tune-share-max:
 tune-joint-max:
 	@HPO_EPOCHS?=6; \
 	python scripts/tune_max.py --agent joint --study noaug-joint-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+#==============================================================================
+# Super-Max HPO (100 epochs + EarlyStopping, very high trial counts)
+#==============================================================================
+
+# Override trial counts and parallelism via environment:
+#   N_TRIALS_CRITERIA=6000 PAR=6 make tune-criteria-supermax
+PAR ?= 4
+N_TRIALS_CRITERIA ?= 5000
+N_TRIALS_EVIDENCE ?= 8000
+N_TRIALS_SHARE ?= 3000
+N_TRIALS_JOINT ?= 3000
+HPO_OUTDIR ?= ./_runs
+
+## tune-criteria-supermax: Run super-max HPO for criteria (5000 trials, 100 epochs, ES patience=20)
+tune-criteria-supermax:
+	@echo "$(BLUE)Running SUPER-MAX HPO for Criteria...$(NC)"
+	@echo "Trials: $(N_TRIALS_CRITERIA) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
+	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
+		--agent criteria --study noaug-criteria-supermax \
+		--n-trials $(N_TRIALS_CRITERIA) --parallel $(PAR) \
+		--outdir $(HPO_OUTDIR)
+
+## tune-evidence-supermax: Run super-max HPO for evidence (8000 trials, 100 epochs, ES patience=20)
+tune-evidence-supermax:
+	@echo "$(BLUE)Running SUPER-MAX HPO for Evidence...$(NC)"
+	@echo "Trials: $(N_TRIALS_EVIDENCE) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
+	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
+		--agent evidence --study noaug-evidence-supermax \
+		--n-trials $(N_TRIALS_EVIDENCE) --parallel $(PAR) \
+		--outdir $(HPO_OUTDIR)
+
+## tune-share-supermax: Run super-max HPO for share (3000 trials, 100 epochs, ES patience=20)
+tune-share-supermax:
+	@echo "$(BLUE)Running SUPER-MAX HPO for Share...$(NC)"
+	@echo "Trials: $(N_TRIALS_SHARE) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
+	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
+		--agent share --study noaug-share-supermax \
+		--n-trials $(N_TRIALS_SHARE) --parallel $(PAR) \
+		--outdir $(HPO_OUTDIR)
+
+## tune-joint-supermax: Run super-max HPO for joint (3000 trials, 100 epochs, ES patience=20)
+tune-joint-supermax:
+	@echo "$(BLUE)Running SUPER-MAX HPO for Joint...$(NC)"
+	@echo "Trials: $(N_TRIALS_JOINT) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
+	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
+		--agent joint --study noaug-joint-supermax \
+		--n-trials $(N_TRIALS_JOINT) --parallel $(PAR) \
+		--outdir $(HPO_OUTDIR)
+
+## tune-all-supermax: Run super-max HPO for ALL architectures sequentially (criteria→evidence→share→joint)
+tune-all-supermax:
+	@echo "$(BLUE)======================================================================"
+	@echo "  Running Super-Max HPO for ALL Architectures Sequentially"
+	@echo "======================================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Sequence: Criteria → Evidence → Share → Joint$(NC)"
+	@echo "$(YELLOW)Total trials: ~19,000 (5000+8000+3000+3000)$(NC)"
+	@echo "$(YELLOW)Estimated time: ~80-120 hours with PAR=4$(NC)"
+	@echo ""
+	@echo "$(GREEN)Starting...$(NC)"
+	@echo ""
+	@echo "$(BLUE)[1/4] Running Criteria (5000 trials)...$(NC)"
+	@$(MAKE) tune-criteria-supermax
+	@echo ""
+	@echo "$(GREEN)✓ Criteria complete!$(NC)"
+	@echo ""
+	@echo "$(BLUE)[2/4] Running Evidence (8000 trials)...$(NC)"
+	@$(MAKE) tune-evidence-supermax
+	@echo ""
+	@echo "$(GREEN)✓ Evidence complete!$(NC)"
+	@echo ""
+	@echo "$(BLUE)[3/4] Running Share (3000 trials)...$(NC)"
+	@$(MAKE) tune-share-supermax
+	@echo ""
+	@echo "$(GREEN)✓ Share complete!$(NC)"
+	@echo ""
+	@echo "$(BLUE)[4/4] Running Joint (3000 trials)...$(NC)"
+	@$(MAKE) tune-joint-supermax
+	@echo ""
+	@echo "$(GREEN)✓ Joint complete!$(NC)"
+	@echo ""
+	@echo "$(GREEN)======================================================================"
+	@echo "  ✓ ALL SUPER-MAX HPO RUNS COMPLETE!"
+	@echo "======================================================================$(NC)"
+	@echo ""
+	@echo "Results saved to: $(HPO_OUTDIR)"
+	@echo "View with: mlflow ui --backend-store-uri sqlite:///mlflow.db"
+	@echo ""
