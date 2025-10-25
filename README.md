@@ -26,6 +26,66 @@ psy-agents show-best --agent evidence --study noaug-evidence-max --topk 5
 > - Optuna storage defaults to ./_optuna/noaug.db (sqlite).
 > - No augmentation: ensure criteria uses "status", evidence uses "cases" only.
 
+## 🚀 Data Augmentation (Infrastructure Ready)
+
+**Status:** Augmentation infrastructure is 60% complete and ready for activation.
+
+### Infrastructure Already in Place
+
+- ✅ **17 CPU-light augmenters** in `src/psy_agents_noaug/augmentation/registry.py`
+  - nlpaug: Synonym, Spelling, Keyboard, OCR, Random, Split, TF-IDF, Reserved
+  - TextAttack: CharSwap, Deletion, Swap, Synonym Insertion, EDA, CheckList, WordNet
+- ✅ **Pipeline class** with deterministic seeding (`augmentation/pipeline.py`)
+- ✅ **Dataset hooks** already implemented in `data/datasets.py`
+- ✅ **Worker initialization** for multi-GPU determinism
+- ✅ **Configuration system** (`configs/augmentation/default.yaml`)
+
+### Quick Start with Augmentation
+
+```bash
+# Enable augmentation (currently dormant by default)
+psy-agents train --agent criteria augmentation.enabled=true
+
+# Configure augmentation scope
+psy-agents train augmentation.scope=train_only  # Recommended
+psy-agents train augmentation.scope=all         # All splits
+psy-agents train augmentation.scope=none        # Disabled
+
+# Set augmentation probability and operations
+psy-agents train augmentation.p_apply=0.15 augmentation.ops_per_sample=1
+```
+
+### Transformation Roadmap
+
+The project is transitioning from NO-AUG baseline to production-ready AUG system:
+
+📋 **Foundation Documents** (Completed):
+- `INVENTORY.md` - Complete codebase mapping (1,954 lines)
+- `QUALITY-GATES.md` - 10 production quality gates (351 lines)
+- `PR_PLAN.md` - 5-PR transformation roadmap (576 lines)
+
+⏳ **5 Sequential PRs** (54-78 hours, 3 weeks):
+1. PR#1: Quality Gates & CI Infrastructure (8-12h)
+2. PR#2: Augmentation Integration & Tests (16-24h)
+3. PR#3: HPO Integration & Observability (12-16h)
+4. PR#4: Packaging, Docker & Security (10-14h)
+5. PR#5: Documentation & Release (8-12h)
+
+### Key Files
+
+- `INVENTORY.md` - Codebase analysis and augmentation status
+- `QUALITY-GATES.md` - Production readiness criteria
+- `PR_PLAN.md` - Detailed transformation plan
+- `CHANGELOG.md` - Version history and transformation progress
+- `configs/augmentation/default.yaml` - Augmentation configuration
+
+### Next Steps
+
+1. Review foundation documents (`INVENTORY.md`, `QUALITY-GATES.md`, `PR_PLAN.md`)
+2. Follow PR sequence for full activation
+3. Run quality gates to ensure production readiness
+4. Monitor `CHANGELOG.md` for transformation progress
+
 ## Recent Updates (October 2025)
 
 **Production-Ready HPO System:**
