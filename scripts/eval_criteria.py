@@ -25,7 +25,6 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
-import torch.nn as nn
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from sklearn.metrics import (
@@ -37,6 +36,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from torch import nn
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
@@ -73,7 +73,7 @@ def load_model_from_checkpoint(
     )
 
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device)
     model.eval()
@@ -115,14 +115,12 @@ def create_dataloader(
         persistent_workers=cfg.dataset.get("persistent_workers"),
     )
 
-    dataloader = DataLoader(
+    return DataLoader(
         dataset,
         batch_size=cfg.get("eval_batch_size", cfg.training.eval_batch_size),
         shuffle=False,
         **dataloader_kwargs,
     )
-
-    return dataloader
 
 
 def evaluate_model(
@@ -194,7 +192,7 @@ def evaluate_model(
         zero_division=0,
     )
 
-    metrics = {
+    return {
         "accuracy": accuracy,
         "f1_macro": f1_macro,
         "f1_micro": f1_micro,
@@ -206,8 +204,6 @@ def evaluate_model(
         "classification_report": class_report,
         "total_samples": len(all_labels),
     }
-
-    return metrics
 
 
 @hydra.main(version_base=None, config_path="../configs/criteria", config_name="train")
@@ -277,8 +273,8 @@ def main(cfg: DictConfig):
 
     print("\nConfusion Matrix:")
     cm = np.array(metrics["confusion_matrix"])
-    print(f"              Predicted")
-    print(f"              Neg   Pos")
+    print("              Predicted")
+    print("              Neg   Pos")
     print(f"Actual  Neg   {cm[0, 0]:4d}  {cm[0, 1]:4d}")
     print(f"        Pos   {cm[1, 0]:4d}  {cm[1, 1]:4d}")
 
@@ -295,7 +291,7 @@ def main(cfg: DictConfig):
         k: (
             v.tolist()
             if isinstance(v, np.ndarray)
-            else float(v) if isinstance(v, (np.floating, np.integer)) else v
+            else float(v) if isinstance(v, np.floating | np.integer) else v
         )
         for k, v in metrics.items()
     }

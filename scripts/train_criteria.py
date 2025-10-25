@@ -29,10 +29,10 @@ from pathlib import Path
 import hydra
 import mlflow
 import torch
-import torch.nn as nn
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from torch import nn
 from torch.utils.data import DataLoader, random_split
 from transformers import AutoTokenizer
 
@@ -80,7 +80,6 @@ def create_dataloaders(
     # Split dataset
     train_ratio = 0.8
     val_ratio = 0.1
-    test_ratio = 0.1
 
     train_size = int(train_ratio * len(dataset))
     val_size = int(val_ratio * len(dataset))
@@ -176,12 +175,10 @@ def create_optimizer(cfg: DictConfig, model: nn.Module) -> torch.optim.Optimizer
         },
     ]
 
-    optimizer = torch.optim.AdamW(
+    return torch.optim.AdamW(
         optimizer_grouped_parameters,
         lr=cfg.training.learning_rate,
     )
-
-    return optimizer
 
 
 def create_scheduler(
@@ -196,13 +193,12 @@ def create_scheduler(
     warmup_steps = cfg.training.scheduler.warmup_steps
 
     if scheduler_name and scheduler_name != "none":
-        scheduler = get_scheduler(
+        return get_scheduler(
             name=scheduler_name,
             optimizer=optimizer,
             num_warmup_steps=warmup_steps,
             num_training_steps=num_training_steps,
         )
-        return scheduler
     return None
 
 
@@ -268,7 +264,9 @@ def main(cfg: DictConfig):
 
     # Configure MLflow
     experiment_name = f"{cfg.project}-train"
-    run_name = f"{cfg.model.pretrained_model.split('/')[-1]}_epochs{cfg.training.epochs}"
+    run_name = (
+        f"{cfg.model.pretrained_model.split('/')[-1]}_epochs{cfg.training.epochs}"
+    )
     tracking_uri = resolve_tracking_uri(cfg.mlflow.tracking_uri, project_root)
     artifact_location = resolve_artifact_location(
         cfg.mlflow.get("artifact_location"), project_root
@@ -286,7 +284,18 @@ def main(cfg: DictConfig):
     log_config(cfg)
 
     # Create output directory for checkpoints
-    output_dir = Path(cfg.hydra.run.dir) / "checkpoints"
+    if (
+        hasattr(cfg, "hydra")
+        and hasattr(cfg.hydra, "run")
+        and hasattr(cfg.hydra.run, "dir")
+    ):
+        output_dir = Path(cfg.hydra.run.dir) / "checkpoints"
+    else:
+        # Fallback when hydra config is not available
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_dir = Path("outputs") / "criteria" / timestamp / "checkpoints"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create trainer
@@ -299,7 +308,7 @@ def main(cfg: DictConfig):
     print(f"Optimizer: {cfg.training.optimizer.name}")
     print(f"Scheduler: {cfg.training.scheduler.name}")
     print(f"Gradient accumulation: {cfg.training.gradient_accumulation}")
-    print(f"Mixed precision: enabled")
+    print("Mixed precision: enabled")
     print(f"Early stopping: {cfg.training.monitor_metric} (patience=3)")
 
     trainer = Trainer(
@@ -336,7 +345,9 @@ def main(cfg: DictConfig):
 
     best_checkpoint_path = output_dir / "best_checkpoint.pt"
     if best_checkpoint_path.exists():
-        checkpoint = torch.load(best_checkpoint_path, map_location=device)
+        checkpoint = torch.load(
+            best_checkpoint_path, map_location=device, weights_only=True
+        )
         model.load_state_dict(checkpoint["model_state_dict"])
         print(f"Loaded best checkpoint from epoch {checkpoint['epoch'] + 1}")
     else:
@@ -395,7 +406,9 @@ def main(cfg: DictConfig):
     print("=" * 70)
     print(f"Checkpoints saved to: {output_dir}")
     print(f"MLflow run ID: {run_id}")
-    print(f"Best {cfg.training.monitor_metric}: {final_metrics[f'best_{cfg.training.monitor_metric}']:.4f}")
+    print(
+        f"Best {cfg.training.monitor_metric}: {final_metrics[f'best_{cfg.training.monitor_metric}']:.4f}"
+    )
 
 
 if __name__ == "__main__":

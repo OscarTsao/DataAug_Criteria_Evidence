@@ -1,15 +1,27 @@
 """Comprehensive training loop with MLflow, AMP, and early stopping."""
 
+import json
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import mlflow
 import numpy as np
 import torch
-import torch.nn as nn
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from torch import nn
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+if TYPE_CHECKING:  # pragma: no cover
+    from psy_agents_noaug.augmentation import AugmenterPipeline
 
 
 class Trainer:
@@ -46,6 +58,8 @@ class Trainer:
         early_stopping_mode: str = "max",
         min_delta: float = 0.0001,
         logging_steps: int = 100,
+        augmenter_pipeline: "AugmenterPipeline | None" = None,
+        augmenter_config: dict[str, Any] | None = None,
     ):
         """
         Initialize trainer.
@@ -88,6 +102,9 @@ class Trainer:
         self.early_stopping_mode = early_stopping_mode
         self.min_delta = min_delta
         self.logging_steps = logging_steps
+        self.augmenter_pipeline = augmenter_pipeline
+        self.augmenter_config = augmenter_config
+        self._aug_examples_logged = False
 
         use_scaler = self.use_amp and self.amp_dtype == torch.float16
         self.scaler = GradScaler("cuda", enabled=use_scaler)
@@ -100,7 +117,7 @@ class Trainer:
             float("-inf") if early_stopping_mode == "max" else float("inf")
         )
         self.epochs_without_improvement = 0
-        self.training_history = []
+        self.training_history: list[dict[str, float]] = []
         self.global_step = 0
 
     def train_epoch(self, epoch: int) -> dict[str, float]:
@@ -120,11 +137,20 @@ class Trainer:
         correct = 0
         total = 0
 
+        ema_window = 10
+        ema_alpha = 2.0 / (ema_window + 1)
+        data_time_ema: float | None = None
+        step_time_ema: float | None = None
+        batch_start_time = time.time()
+
         pbar = tqdm(
             self.train_loader, desc=f"Epoch {epoch + 1}/{self.num_epochs}", leave=False
         )
 
         for batch_idx, batch in enumerate(pbar):
+            data_ready_time = time.time()
+            data_time = data_ready_time - batch_start_time
+
             # Move batch to device
             input_ids = batch["input_ids"].to(self.device)
             attention_mask = batch["attention_mask"].to(self.device)
@@ -143,6 +169,19 @@ class Trainer:
                 self.scaler.scale(loss).backward()
             else:
                 loss.backward()
+
+            compute_done_time = time.time()
+            step_time = compute_done_time - data_ready_time
+
+            if data_time_ema is None:
+                data_time_ema = data_time
+            else:
+                data_time_ema += ema_alpha * (data_time - data_time_ema)
+
+            if step_time_ema is None:
+                step_time_ema = step_time
+            else:
+                step_time_ema += ema_alpha * (step_time - step_time_ema)
 
             # Gradient accumulation
             if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
@@ -168,11 +207,17 @@ class Trainer:
 
                 # Log to MLflow
                 if self.global_step % self.logging_steps == 0:
+                    perf_ratio = 0.0
+                    if step_time_ema is not None and step_time_ema > 0:
+                        perf_ratio = float(data_time_ema or 0.0) / step_time_ema
                     mlflow.log_metrics(
                         {
                             "train_loss_step": loss.item()
                             * self.gradient_accumulation_steps,
                             "learning_rate": self.optimizer.param_groups[0]["lr"],
+                            "perf.data_time_ms_ema": ((data_time_ema or 0.0) * 1000.0),
+                            "perf.step_time_ms_ema": ((step_time_ema or 0.0) * 1000.0),
+                            "perf.data_to_step_ratio": perf_ratio,
                         },
                         step=self.global_step,
                     )
@@ -191,13 +236,111 @@ class Trainer:
                 }
             )
 
+            batch_start_time = time.time()
+
         avg_loss = total_loss / max(len(self.train_loader), 1)
         accuracy = correct / total
+
+        perf_ratio_epoch = 0.0
+        if step_time_ema is not None and step_time_ema > 0:
+            perf_ratio_epoch = float(data_time_ema or 0.0) / step_time_ema
 
         return {
             "train_loss": avg_loss,
             "train_accuracy": accuracy,
+            "perf.data_time_ms_ema": (data_time_ema or 0.0) * 1000.0,
+            "perf.step_time_ms_ema": (step_time_ema or 0.0) * 1000.0,
+            "perf.data_to_step_ratio": perf_ratio_epoch,
         }
+
+    @staticmethod
+    def _sanitize_method_name(name: str) -> str:
+        return (
+            name.replace("/", "_").replace(".", "_").replace(" ", "_").replace("-", "_")
+        )
+
+    def _log_augmentation_metrics(self, epoch: int) -> None:
+        if not self.augmenter_pipeline:
+            return
+
+        stats = self.augmenter_pipeline.stats()
+        metrics = {
+            "aug.applied_count": float(stats.get("applied", 0)),
+            "aug.skipped_count": float(stats.get("skipped", 0)),
+            "aug.total_count": float(stats.get("total", 0)),
+        }
+        mlflow.log_metrics(metrics, step=epoch)
+
+        method_counts = stats.get("method_counts", {})
+        if method_counts:
+            mlflow.log_metrics(
+                {
+                    f"aug.method_count.{self._sanitize_method_name(method)}": float(
+                        count
+                    )
+                    for method, count in method_counts.items()
+                },
+                step=epoch,
+            )
+
+        if not self._aug_examples_logged:
+            examples = self.augmenter_pipeline.drain_examples()
+            if examples:
+                artifact_dir = self.save_dir or Path(".")
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                artifact_path = artifact_dir / "aug_examples.jsonl"
+                with artifact_path.open("w", encoding="utf-8") as fp:
+                    for example in examples:
+                        fp.write(json.dumps(example, ensure_ascii=False) + "\n")
+                mlflow.log_artifact(str(artifact_path), artifact_path="augmentation")
+                self._aug_examples_logged = True
+
+    def _log_augmentation_params(self) -> None:
+        """Log augmentation configuration once per training run."""
+        if mlflow.active_run() is None:
+            return
+
+        cfg_obj = self.augmenter_config
+        has_pipeline = self.augmenter_pipeline is not None
+
+        if cfg_obj is None:
+            mlflow.log_params({"aug.enabled": False})
+            return
+
+        def _get(field: str, default: Any = None) -> Any:
+            if isinstance(cfg_obj, dict):
+                return cfg_obj.get(field, default)
+            return getattr(cfg_obj, field, default)
+
+        lib = _get("lib", "none")
+        enabled = has_pipeline and lib != "none"
+
+        if has_pipeline and self.augmenter_pipeline is not None:
+            methods = sorted(self.augmenter_pipeline.methods)
+        else:
+            raw_methods = _get("methods", [])
+            if isinstance(raw_methods, str):
+                raw_methods = [raw_methods]
+            methods = sorted(str(m) for m in raw_methods)
+
+        params: dict[str, Any] = {
+            "aug.enabled": bool(enabled),
+            "aug.lib": lib,
+            "aug.methods": ";".join(methods) if methods else "",
+            "aug.p_apply": float(_get("p_apply", 0.0)),
+            "aug.ops_per_sample": int(_get("ops_per_sample", 1)),
+            "aug.max_replace_ratio": float(_get("max_replace_ratio", 0.0)),
+            "aug.tfidf_model_path": _get("tfidf_model_path"),
+            "aug.reserved_map_path": _get("reserved_map_path"),
+        }
+
+        method_kwargs = _get("method_kwargs", {})
+        if method_kwargs:
+            params["aug.method_kwargs"] = json.dumps(
+                method_kwargs, ensure_ascii=False, sort_keys=True
+            )
+
+        mlflow.log_params(params)
 
     def validate(self) -> dict[str, float]:
         """
@@ -209,9 +352,9 @@ class Trainer:
         self.model.eval()
 
         total_loss = 0.0
-        all_preds = []
-        all_labels = []
-        all_probabilities = []
+        all_preds: list[int] = []
+        all_labels: list[int] = []
+        all_probabilities: list[float] = []
 
         with torch.no_grad():
             for batch in tqdm(self.val_loader, desc="Validation", leave=False):
@@ -234,8 +377,8 @@ class Trainer:
                 all_probabilities.extend(probs.cpu().numpy())
 
         # Calculate metrics
-        all_preds = np.array(all_preds)
-        all_labels = np.array(all_labels)
+        all_preds = np.array(all_preds)  # type: ignore[assignment]
+        all_labels = np.array(all_labels)  # type: ignore[assignment]
         probabilities = np.array(all_probabilities)
 
         avg_loss = total_loss / max(len(self.val_loader), 1)
@@ -249,7 +392,7 @@ class Trainer:
             all_labels, all_preds, average="macro", zero_division=0
         )
 
-        auroc_macro = None
+        auroc_macro: float | None = None
         try:
             if probabilities.size == 0:
                 auroc_macro = None
@@ -269,7 +412,7 @@ class Trainer:
             "val_f1_micro": f1_micro,
             "val_precision_macro": precision_macro,
             "val_recall_macro": recall_macro,
-            "val_auroc_macro": auroc_macro,
+            "val_auroc_macro": auroc_macro if auroc_macro is not None else 0.0,
         }
 
     def save_checkpoint(
@@ -308,8 +451,7 @@ class Trainer:
         """Check if current metric value is an improvement."""
         if self.early_stopping_mode == "max":
             return current_value > (self.best_metric_value + self.min_delta)
-        else:
-            return current_value < (self.best_metric_value - self.min_delta)
+        return current_value < (self.best_metric_value - self.min_delta)
 
     def train(self) -> dict[str, float]:
         """
@@ -322,6 +464,8 @@ class Trainer:
         print(
             f"Early stopping: {self.early_stopping_metric} ({self.early_stopping_mode}), patience={self.patience}"
         )
+
+        self._log_augmentation_params()
 
         for epoch in range(self.num_epochs):
             epoch_start = time.time()
@@ -344,6 +488,8 @@ class Trainer:
 
             # Log to MLflow
             mlflow.log_metrics(metrics, step=epoch)
+
+            self._log_augmentation_metrics(epoch)
 
             # Save history
             self.training_history.append(metrics)

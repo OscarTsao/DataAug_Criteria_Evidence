@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import nn
-from transformers import PreTrainedTokenizerBase
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
 
 _ARTIFACT_ROOT = Path(__file__).resolve().parents[3] / "artifacts"
 _DEFAULT_BEST_FILENAME = "best_model.pt"
@@ -49,10 +52,8 @@ def save_best_model_state(
     if optimizer is not None:
         state["optimizer_state_dict"] = optimizer.state_dict()
     if scheduler is not None:
-        try:
+        with contextlib.suppress(Exception):
             state["scheduler_state_dict"] = scheduler.state_dict()
-        except Exception:
-            pass
     if extra_state:
         state["extra_state"] = extra_state
 
@@ -89,10 +90,8 @@ def save_training_state(
     if optimizer is not None:
         state["optimizer_state_dict"] = optimizer.state_dict()
     if scheduler is not None:
-        try:
+        with contextlib.suppress(Exception):
             state["scheduler_state_dict"] = scheduler.state_dict()
-        except Exception:
-            pass
     if rng_state:
         state["rng_state"] = rng_state
     checkpoint_path = get_artifact_path(project, filename)
@@ -108,17 +107,20 @@ def load_training_state(
     scheduler: Any | None = None,
     filename: str = _DEFAULT_LAST_FILENAME,
 ) -> dict[str, Any]:
-    """Load a previously saved training state into the provided modules."""
+    """Load a previously saved training state into the provided modules.
+
+    Security Note:
+        Uses weights_only=True for safe deserialization. Only load checkpoints
+        from trusted sources to prevent arbitrary code execution (CVE-2022-45907).
+    """
     checkpoint_path = get_artifact_path(project, filename)
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if scheduler is not None and "scheduler_state_dict" in checkpoint:
-        try:
+        with contextlib.suppress(Exception):
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        except Exception:
-            pass
     return checkpoint
 
 
@@ -135,18 +137,21 @@ def load_best_model_state(
     scheduler: Any | None = None,
     filename: str = _DEFAULT_BEST_FILENAME,
 ) -> dict[str, Any]:
-    """Load the best model checkpoint into the provided model/optimizers."""
+    """Load the best model checkpoint into the provided model/optimizers.
+
+    Security Note:
+        Uses weights_only=True for safe deserialization. Only load checkpoints
+        from trusted sources to prevent arbitrary code execution (CVE-2022-45907).
+    """
     checkpoint_path = get_artifact_path(project, filename)
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if scheduler is not None and "scheduler_state_dict" in checkpoint:
-        try:
+        with contextlib.suppress(Exception):
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        except Exception:
-            pass
     return checkpoint
 
 
@@ -208,11 +213,16 @@ class BestModelSaver:
         return True
 
     def load_existing(self) -> dict[str, Any] | None:
-        """Load metadata from disk if a best model checkpoint already exists."""
+        """Load metadata from disk if a best model checkpoint already exists.
+
+        Security Note:
+            Uses weights_only=True for safe deserialization. Only load checkpoints
+            from trusted sources to prevent arbitrary code execution (CVE-2022-45907).
+        """
         path = get_artifact_path(self.project, self.filename)
         if not path.exists():
             return None
-        checkpoint = torch.load(path, map_location="cpu")
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         metric_value = checkpoint.get("metric_value")
         if metric_value is not None:
             self.best_metric = metric_value

@@ -1,5 +1,6 @@
 """Enhanced MLflow utilities for experiment tracking."""
 
+import contextlib
 import hashlib
 import json
 import subprocess
@@ -14,14 +15,13 @@ from omegaconf import DictConfig, OmegaConf
 def get_git_sha() -> str | None:
     """Get current git SHA if in a git repository."""
     try:
-        sha = (
+        return (
             subprocess.check_output(
                 ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
             )
             .decode("utf-8")
             .strip()
         )
-        return sha
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -29,7 +29,8 @@ def get_git_sha() -> str | None:
 def get_config_hash(config: DictConfig) -> str:
     """Generate hash of configuration for reproducibility tracking."""
     config_str = OmegaConf.to_yaml(config)
-    return hashlib.md5(config_str.encode()).hexdigest()[:8]
+    # Using MD5 for non-security purposes (config fingerprinting only)
+    return hashlib.md5(config_str.encode(), usedforsecurity=False).hexdigest()[:8]
 
 
 def resolve_tracking_uri(tracking_uri: str, base_dir: Path) -> str:
@@ -56,10 +57,11 @@ def resolve_tracking_uri(tracking_uri: str, base_dir: Path) -> str:
         return tracking_uri
 
     if parsed.scheme == "file":
-        if parsed.netloc:
-            candidate = Path(f"{parsed.netloc}{parsed.path}")
-        else:
-            candidate = Path(parsed.path)
+        candidate = (
+            Path(f"{parsed.netloc}{parsed.path}")
+            if parsed.netloc
+            else Path(parsed.path)
+        )
         if not candidate.is_absolute():
             candidate = (base_dir / candidate).resolve()
         return candidate.as_uri()
@@ -86,10 +88,11 @@ def resolve_artifact_location(
         return artifact_location
 
     if parsed.scheme == "file":
-        if parsed.netloc:
-            candidate = Path(f"{parsed.netloc}{parsed.path}")
-        else:
-            candidate = Path(parsed.path)
+        candidate = (
+            Path(f"{parsed.netloc}{parsed.path}")
+            if parsed.netloc
+            else Path(parsed.path)
+        )
     else:
         candidate = Path(artifact_location)
 
@@ -207,12 +210,10 @@ def _log_dict_recursive(d: dict[str, Any], prefix: str = ""):
 
         if isinstance(value, dict):
             _log_dict_recursive(value, prefix=f"{param_name}.")
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             # Log lists as JSON strings
-            try:
+            with contextlib.suppress(Exception):
                 mlflow.log_param(param_name, json.dumps(value))
-            except Exception:
-                pass
         else:
             # Log scalar parameters
             try:

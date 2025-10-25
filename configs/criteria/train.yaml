@@ -17,7 +17,7 @@ model:
   classifier_hidden_dims: []
 
 training:
-  epochs: 3
+  epochs: 10
   learning_rate: 2e-5
   train_batch_size: 16
   eval_batch_size: 32
@@ -31,7 +31,7 @@ training:
   scheduler:
     name: linear
     warmup_steps: 0
-  monitor_metric: validation_f1
+  monitor_metric: val_f1_macro
   monitor_mode: max
 
 mlflow:
