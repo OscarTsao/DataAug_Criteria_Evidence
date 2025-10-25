@@ -6,12 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **PSY Agents NO-AUG** is a baseline implementation for clinical text analysis (Criteria and Evidence extraction from DSM-5 diagnostic posts) **without data augmentation**. This is a control repository for comparing against augmentation-enhanced models.
 
-**Critical Principle:** This repository enforces **STRICT field separation** to prevent data leakage:
-- **Criteria Task**: Uses ONLY `status` field from annotations
-- **Evidence Task**: Uses ONLY `cases` field from annotations
-- Any code violating this separation will fail with `AssertionError`
+**Critical Principles:**
 
-**Development Environment:** This project uses VS Code Dev Containers (`.devcontainer/`) for consistent development and training environments with CUDA support.
+1. **STRICT Field Separation** (enforced by assertions):
+   - **Criteria Task**: Uses ONLY `status` field from annotations
+   - **Evidence Task**: Uses ONLY `cases` field from annotations
+   - Any code violating this separation will fail with `AssertionError`
+
+2. **NO Augmentation** (despite some residual code):
+   - This is a baseline NO-AUG control repository
+   - ⚠️ WARNING: `src/psy_agents_noaug/augmentation/` exists but is **UNUSED** (100KB of dead code)
+   - Dependencies nlpaug/textattack are listed but not used in training
+
+3. **Duplicate Architecture Warning**:
+   - ⚠️ **TWO identical implementations** exist (904KB duplication):
+     - `src/Project/` (376KB) - Used by standalone scripts
+     - `src/psy_agents_noaug/architectures/` (528KB) - Not used by CLI
+   - Only modify one to avoid divergence
+   - See `CODEBASE_STRUCTURE_ANALYSIS.md` for consolidation plan
+
+**Development Environment:** Uses VS Code Dev Containers (`.devcontainer/`) with CUDA 12.1, Python 3.10, Poetry, PyTorch.
 
 ## Essential Commands
 
@@ -126,27 +140,35 @@ make export
 
 ## Architecture Overview
 
-### Four Supported Architectures
+### Four Architectures (⚠️ DUPLICATE IMPLEMENTATIONS)
 
-Located in `src/psy_agents_noaug/architectures/` and `src/Project/`:
+**Current State:**
+- `src/Project/` (376KB) - **ACTIVE**: Used by `train_criteria.py`, `eval_criteria.py`
+- `src/psy_agents_noaug/architectures/` (528KB) - **INACTIVE**: Has train/eval engines but not used by CLI
 
-1. **Criteria** (`criteria/`): Post ↔ criterion pair encoder + binary classifier
-   - Binary classification (status: present/absent)
-   - Model: Transformer encoder → pooled output → classification head
+**Architectures:**
+
+1. **Criteria** (`criteria/`): Binary classification for criterion presence
+   - Model: Transformer encoder → pooled output → binary classification head
    - Dataset: `CriteriaDataset` (uses ONLY `status` field)
+   - Scripts: `scripts/train_criteria.py`, `scripts/eval_criteria.py` ✅ Production-ready
 
-2. **Evidence** (`evidence/`): Post ↔ criterion span extractor
-   - Span prediction (start/end positions)
-   - Model: Transformer encoder → span prediction head
+2. **Evidence** (`evidence/`): Span extraction for supporting text
+   - Model: Transformer encoder → span prediction head (start/end positions)
    - Dataset: `EvidenceDataset` (uses ONLY `cases` field)
 
 3. **Share** (`share/`): Shared encoder with dual heads
-   - Single encoder for both tasks
-   - Separate classification and span heads
+   - Single transformer encoder for both tasks
+   - Separate classification head and span prediction head
 
 4. **Joint** (`joint/`): Dual encoders with fusion
-   - Separate encoders for criteria and evidence
+   - Separate encoders for criteria and evidence tasks
    - Fusion layer before evidence head
+
+**Interface Parity (October 2025):**
+- All architectures accept `head_cfg` and `task_cfg` parameters
+- Standardized output keys (`"logits"` for all)
+- Backward compatible with direct parameter passing
 
 ### Data Pipeline Architecture
 
@@ -410,26 +432,26 @@ NoAug_Criteria_Evidence/
 └── pyproject.toml            # Poetry dependencies
 ```
 
-## Architecture Implementation Notes
+## Known Technical Debt
 
-**Duplicate Implementations Exist:**
+**1. Duplicate Architecture Implementations (904KB)**
+- `src/Project/` (376KB) - Currently ACTIVE for standalone scripts
+- `src/psy_agents_noaug/architectures/` (528KB) - Has engines but UNUSED
+- **Impact**: Confusion, divergence risk, wasted disk space
+- **Consolidation plan**: See `CODEBASE_STRUCTURE_ANALYSIS.md` (estimated 2-4 hours)
 
-Two architecture implementations coexist:
-1. **`src/Project/`** (800KB) - Simpler, used by standalone training scripts
-2. **`src/psy_agents_noaug/architectures/`** (1.9MB) - Extended features, self-contained
+**2. Unused Augmentation Code (100KB)**
+- `src/psy_agents_noaug/augmentation/` (32KB) - Dead code
+- `tests/test_augmentation_*.py` (55KB) - Dead tests
+- Dependencies: nlpaug, textattack (unused)
+- **Impact**: Contradicts NO-AUG mission, slower pip install
+- **Removal plan**: See `CODEBASE_STRUCTURE_ANALYSIS.md` Phase 1 (estimated 1-2 hours)
 
-**Current Usage:**
-- `src/Project/` powers `train_criteria.py` and `eval_criteria.py` (NEW, production-ready)
-- `src/psy_agents_noaug/architectures/` has train/eval engines but not currently used by CLI
-- Models are identical, datasets differ (psy_agents_noaug has criterion resolution)
-
-**Why Both Exist:**
-- src/Project: Simpler for standalone scripts
-- psy_agents_noaug/architectures: More features, may be used for future CLI integration
-- No conflicts (separate namespaces)
-
-**Future Consolidation:**
-See `OPTIMIZATION_SUMMARY.md` for consolidation plan (2-4 hours estimated).
+**3. Hidden Production Scripts**
+- `scripts/train_criteria.py` (416 lines) - ✅ Production-ready but no Makefile target
+- `scripts/eval_criteria.py` (306 lines) - ✅ Production-ready but no Makefile target
+- **Impact**: Reduced discoverability
+- **Solution**: Add to Makefile or document explicitly
 
 ## Common Pitfalls
 
@@ -478,15 +500,6 @@ See `OPTIMIZATION_SUMMARY.md` for consolidation plan (2-4 hours estimated).
 5. **Pre-commit**: `make pre-commit-run`
 6. **Commit**: Standard git workflow
 
-## NO Augmentation
-
-This is a **baseline repository** without data augmentation:
-- ✅ Standard transformer models (BERT, RoBERTa, DeBERTa)
-- ✅ Training and evaluation
-- ✅ Hyperparameter optimization
-- ❌ NO augmentation techniques
-- ❌ NO augmentation code (nlpaug listed but unused)
-
 ## Quick Reference
 
 ```bash
@@ -509,28 +522,29 @@ cat docs/QUICK_START.md         # Quick start guide
 
 ## Recent Updates (2025)
 
-**🚀 NEW: Production-Ready HPO System (January 2025):**
-- ✅ **Real data integration**: Both HPO systems connected to redsm5 dataset
-- ✅ **Multi-stage HPO**: Progressive refinement (8+20+50 trials)
-- ✅ **Maximal HPO**: Single large runs (600-1200 trials)
-- ✅ **Sequential wrapper**: `run_all_hpo.py` for all architectures
-- ✅ **Complete documentation**: `docs/HPO_GUIDE.md`
-- ❌ **NO synthetic data** - 100% production ready
+**October 2025:**
+- ✅ Production-ready HPO system (multi-stage + maximal modes)
+- ✅ Interface parity: all architectures accept `head_cfg`/`task_cfg`
+- ✅ Optuna 4.5.0 compatibility (NSGAIISampler)
+- ✅ PyTorch 2.x AMP API migration
+- ✅ 67/69 tests passing (97.1%), 31% coverage
+- ✅ Comprehensive codebase structure analysis added
 
-**Training Infrastructure:**
-- Enhanced reproducibility with full determinism support
-- Hardware-optimized DataLoader settings (2-5x faster)
+**Training Infrastructure (January 2025):**
+- Enhanced reproducibility with full determinism (`torch.use_deterministic_algorithms()`)
+- Hardware-optimized DataLoader (2-5x faster with persistent workers)
 - Mixed precision (AMP) with Float16/BFloat16 auto-detection
-- Production-ready Criteria training/evaluation scripts
-- Comprehensive training documentation
+- Production-ready standalone scripts: `train_criteria.py`, `eval_criteria.py`
 
 **Project Optimization:**
-- Removed 3 redundant documentation files (-985 lines)
+- Removed 3 redundant docs (-985 lines)
 - Unified Docker config (`.devcontainer/` only)
 - Cleaned all cache files
-- Verified no unused imports (ruff check)
-- Documented architecture implementation status
+- **NEW**: Added `CODEBASE_STRUCTURE_ANALYSIS.md` and `CODEBASE_QUICK_SUMMARY.txt`
 
-See `docs/HPO_GUIDE.md` for HPO system details.
-See `docs/TRAINING_GUIDE.md` and `docs/TRAINING_SETUP_COMPLETE.md` for training details.
-See `OPTIMIZATION_SUMMARY.md` for full cleanup details.
+**Key Documentation:**
+- `docs/HPO_GUIDE.md` - HPO system comprehensive guide
+- `docs/TRAINING_GUIDE.md` - Training best practices
+- `docs/CLI_AND_MAKEFILE_GUIDE.md` - CLI reference
+- `CODEBASE_STRUCTURE_ANALYSIS.md` - ⭐ Detailed code inventory and consolidation roadmap
+- `OPTIMIZATION_SUMMARY.md` - Previous cleanup details
