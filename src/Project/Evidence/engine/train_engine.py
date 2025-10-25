@@ -34,7 +34,7 @@ def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         accumulator[prefix] = ",".join(map(str, value))
     else:
         accumulator[prefix] = value

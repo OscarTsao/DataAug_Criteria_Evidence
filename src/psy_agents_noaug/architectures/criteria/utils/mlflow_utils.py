@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_TRACKING_URI = f"sqlite:///{(_ROOT / 'mlflow.db').resolve()}"
@@ -86,7 +88,7 @@ def enable_autologging(enable: bool = True) -> None:
     ):
         try:
             mod = __import__(mod_name, fromlist=["autolog"])  # type: ignore
-            getattr(mod, "autolog")()
+            mod.autolog()
         except Exception:
             continue
 
@@ -108,13 +110,9 @@ def mlflow_run(
 
     with mlflow.start_run(run_name=name, nested=nested) as run:
         if tags:
-            try:
+            with contextlib.suppress(Exception):
                 mlflow.set_tags(tags)
-            except Exception:
-                pass
         if params:
-            try:
+            with contextlib.suppress(Exception):
                 mlflow.log_params(params)
-            except Exception:
-                pass
         yield run

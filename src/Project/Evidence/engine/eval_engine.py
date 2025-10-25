@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import nn
@@ -14,6 +13,9 @@ from Project.Evidence.engine.train_engine import (
     _prepare_datasets,
 )
 from Project.Evidence.utils import get_logger, load_best_model, set_seed
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def evaluate(
@@ -109,7 +111,7 @@ def predict(
             end_pred = end_logits.argmax(dim=-1).cpu()
 
         for context, start_idx_tensor, end_idx_tensor, offset_tensor in zip(
-            batch_contexts, start_pred, end_pred, offsets
+            batch_contexts, start_pred, end_pred, offsets, strict=False
         ):
             start_token = int(start_idx_tensor.item())
             end_token = int(end_idx_tensor.item())
@@ -118,8 +120,7 @@ def predict(
                 start_token = len(offset_pairs) - 1
             if end_token >= len(offset_pairs):
                 end_token = len(offset_pairs) - 1
-            if end_token < start_token:
-                end_token = start_token
+            end_token = max(end_token, start_token)
 
             start_char = offset_pairs[start_token][0]
             end_char = offset_pairs[end_token][1]

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 DEFAULT_DSM_CRITERIA_PATH = (
     Path(__file__).resolve().parents[4]

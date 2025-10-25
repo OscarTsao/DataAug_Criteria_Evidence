@@ -32,7 +32,7 @@ def _as_hidden_dims(
         return []
     if hidden is None:
         return [fallback] * (layers - 1)
-    if isinstance(hidden, Sequence) and not isinstance(hidden, (str, bytes)):
+    if isinstance(hidden, Sequence) and not isinstance(hidden, str | bytes):
         dims = [int(h) for h in hidden]
     else:
         dims = [int(hidden)] * (layers - 1)
@@ -115,7 +115,7 @@ class ClassificationHead(nn.Module):
         hidden_dims = _as_hidden_dims(hidden, layers, fallback=input_dim)
         dims = [input_dim] + hidden_dims
         blocks: list[nn.Module] = []
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+        for in_dim, out_dim in zip(dims[:-1], dims[1:], strict=False):
             blocks.append(nn.Linear(in_dim, out_dim))
             blocks.append(_activation(activation))
             blocks.append(nn.Dropout(dropout))
@@ -145,7 +145,7 @@ class SpanPredictionHead(nn.Module):
         hidden_dims = _as_hidden_dims(hidden, layers, fallback=input_dim)
         dims = [input_dim] + hidden_dims
         self.layers = nn.ModuleList()
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+        for in_dim, out_dim in zip(dims[:-1], dims[1:], strict=False):
             self.layers.append(nn.Linear(in_dim, out_dim))
             self.layers.append(_activation(activation))
             self.layers.append(nn.Dropout(dropout))

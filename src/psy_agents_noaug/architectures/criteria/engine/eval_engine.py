@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import nn
@@ -18,6 +17,9 @@ from psy_agents_noaug.architectures.criteria.utils import (
     load_best_model,
     set_seed,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def evaluate(
@@ -110,7 +112,9 @@ def predict(
             probs = torch.softmax(logits, dim=-1)
             preds = probs.argmax(dim=-1)
 
-        for text, pred, prob_vec in zip(batch_texts, preds.cpu(), probs.cpu()):
+        for text, pred, prob_vec in zip(
+            batch_texts, preds.cpu(), probs.cpu(), strict=False
+        ):
             results.append(
                 {
                     "text": text,

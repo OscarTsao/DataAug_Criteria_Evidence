@@ -5,10 +5,9 @@ import random
 import time
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import optuna
 import torch
 from torch import nn
 from torch.cuda.amp import GradScaler, autocast
@@ -29,12 +28,15 @@ from psy_agents_noaug.architectures.criteria.utils import (
     training_state_exists,
 )
 
+if TYPE_CHECKING:
+    import optuna
+
 
 def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         accumulator[prefix] = ",".join(map(str, value))
     else:
         accumulator[prefix] = value
@@ -419,8 +421,7 @@ def train(
         "", {k: v for k, v in config.items() if k != "mlflow"}, flatten_config
     )
 
-    runtime_metrics: dict[str, Any] = {}
-    start_time = time.time()
+    time.time()
 
     with (
         mlflow_run(name=config.get("project", "criteria"))
@@ -494,5 +495,5 @@ def train(
             train_metrics["loss"] = epoch_loss / max(1, len(train_loader))
 
             val_metrics = _evaluate(model, val_loader, device, loss_fn, amp_enabled)
-            prefixed_train = {f"train_{k}": v for k, v in train_metrics.items()}
-            prefixed_val = {f"validation_{k}": v for k, v in val_metrics.items()}
+            {f"train_{k}": v for k, v in train_metrics.items()}
+            {f"validation_{k}": v for k, v in val_metrics.items()}

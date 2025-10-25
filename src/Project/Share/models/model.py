@@ -29,7 +29,7 @@ class ClassificationHead(torch.nn.Module):
 
         dims = (input_dim,) + hidden_dims
         layers = []
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+        for in_dim, out_dim in zip(dims[:-1], dims[1:], strict=False):
             layers.append(torch.nn.Linear(in_dim, out_dim))
             layers.append(torch.nn.GELU())
             layers.append(torch.nn.Dropout(dropout_prob))
@@ -99,7 +99,7 @@ class Model(torch.nn.Module):
             if hidden is not None:
                 if isinstance(hidden, int):
                     criteria_hidden_dims = (hidden,) * (criteria_layer_num - 1)
-                elif isinstance(hidden, (list, tuple)):
+                elif isinstance(hidden, list | tuple):
                     criteria_hidden_dims = tuple(hidden)
 
         # Extract from task_cfg if provided

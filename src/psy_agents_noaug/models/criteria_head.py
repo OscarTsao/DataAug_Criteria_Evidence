@@ -1,7 +1,7 @@
 """Classification head for criteria extraction task."""
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class CriteriaClassificationHead(nn.Module):
@@ -111,9 +111,7 @@ class CriteriaModel(nn.Module):
         )
 
         # Classify
-        logits = self.head(encodings)
-
-        return logits
+        return self.head(encodings)
 
     def predict(
         self,

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import torch
-from torch.optim import Optimizer
 from transformers import (
     get_cosine_schedule_with_warmup,
     get_cosine_with_hard_restarts_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
+
+if TYPE_CHECKING:
+    from torch.optim import Optimizer
 
 
 def _get_parameter_groups(
@@ -24,9 +27,11 @@ def _get_parameter_groups(
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if any(name.endswith(f"{suffix}") for suffix in ("bias", ".bias")):
-            no_decay_params.append(param)
-        elif "LayerNorm.weight" in name or "layer_norm.weight" in name:
+        if (
+            any(name.endswith(f"{suffix}") for suffix in ("bias", ".bias"))
+            or "LayerNorm.weight" in name
+            or "layer_norm.weight" in name
+        ):
             no_decay_params.append(param)
         else:
             decay_params.append(param)

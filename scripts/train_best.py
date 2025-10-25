@@ -23,7 +23,7 @@ from pathlib import Path
 
 import hydra
 from hydra.utils import get_original_cwd
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -62,7 +62,7 @@ def main(cfg: DictConfig):
         print(f"\nWarning: Architecture-specific script not found: {train_script}")
         print(f"Please implement {train_script.name} for {task_name} architecture.")
         print("\nFor now, you can:")
-        print(f"1. Use train_criteria.py as a template")
+        print("1. Use train_criteria.py as a template")
         print(f"2. Adapt it for {task_name} architecture")
         print(f"3. Save it as {train_script.name}")
         sys.exit(1)
@@ -98,13 +98,13 @@ def main(cfg: DictConfig):
 
     # Run the architecture-specific training script
     try:
-        result = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
         print(f"\n{'=' * 70}")
-        print(f"Training Completed Successfully".center(70))
+        print("Training Completed Successfully".center(70))
         print(f"{'=' * 70}\n")
     except subprocess.CalledProcessError as e:
         print(f"\n{'=' * 70}")
-        print(f"Training Failed".center(70))
+        print("Training Failed".center(70))
         print(f"{'=' * 70}")
         print(f"Error: {e}")
         sys.exit(1)

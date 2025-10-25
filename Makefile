@@ -5,6 +5,8 @@
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-share-max tune-joint-max
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
+.PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
+.PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
 
 # Default target
 .DEFAULT_GOAL := help
@@ -57,14 +59,36 @@ help:
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
+	@echo "  make typecheck          - Run mypy type checking"
 	@echo "  make format             - Format code (ruff --fix + black)"
 	@echo "  make test               - Run all tests"
 	@echo "  make test-cov           - Run tests with coverage report"
 	@echo "  make test-groundtruth   - Run ground truth validation tests"
+	@echo "  make lock               - Lock dependencies to requirements-lock.txt"
 	@echo ""
 	@echo "$(GREEN)Pre-commit:$(NC)"
 	@echo "  make pre-commit-install - Install pre-commit hooks"
 	@echo "  make pre-commit-run     - Run pre-commit on all files"
+	@echo "  make pre-commit-update  - Update pre-commit hook versions"
+	@echo ""
+	@echo "$(GREEN)Security & Compliance:$(NC)"
+	@echo "  make audit              - Run security vulnerability scan"
+	@echo "  make audit-strict       - Run audit and fail on critical vulnerabilities"
+	@echo "  make sbom               - Generate Software Bill of Materials"
+	@echo "  make licenses           - Generate third-party license report"
+	@echo "  make compliance         - Run all compliance checks"
+	@echo ""
+	@echo "$(GREEN)Performance & Benchmarking:$(NC)"
+	@echo "  make bench              - Run DataLoader performance benchmarks"
+	@echo "  make verify-determinism - Verify deterministic behavior"
+	@echo ""
+	@echo "$(GREEN)Docker:$(NC)"
+	@echo "  make docker-build       - Build Docker images (multi-stage)"
+	@echo "  make docker-test        - Run tests in Docker container"
+	@echo "  make docker-run         - Start production container"
+	@echo "  make docker-shell       - Open shell in production container"
+	@echo "  make docker-mlflow      - Start MLflow UI in Docker"
+	@echo "  make docker-clean       - Clean Docker images and containers"
 	@echo ""
 	@echo "$(GREEN)Cleaning:$(NC)"
 	@echo "  make clean              - Remove caches and temp files"
@@ -99,6 +123,12 @@ install:
 install-dev:
 	@echo "$(BLUE)Installing development dependencies...$(NC)"
 	poetry install --with dev
+
+## lock: Lock dependencies to requirements-lock.txt
+lock:
+	@echo "$(BLUE)Locking dependencies...$(NC)"
+	poetry export -f requirements.txt --without-hashes --with dev > requirements-lock.txt
+	@echo "$(GREEN)✓ Dependencies locked to requirements-lock.txt$(NC)"
 
 ## sanity-check: Run sanity checks
 sanity-check:
@@ -209,6 +239,12 @@ lint:
 	poetry run black --check src/ tests/ scripts/
 	@echo "$(GREEN)✓ Linting complete$(NC)"
 
+## typecheck: Run mypy type checking
+typecheck:
+	@echo "$(BLUE)Running mypy type checker...$(NC)"
+	poetry run mypy src/psy_agents_noaug/
+	@echo "$(GREEN)✓ Type checking complete$(NC)"
+
 ## format: Format code (ruff --fix + black)
 format:
 	@echo "$(BLUE)Formatting code...$(NC)"
@@ -240,12 +276,66 @@ test-groundtruth:
 pre-commit-install:
 	@echo "$(BLUE)Installing pre-commit hooks...$(NC)"
 	poetry run pre-commit install
+	poetry run pre-commit install --hook-type commit-msg
 	@echo "$(GREEN)✓ Pre-commit hooks installed$(NC)"
 
 ## pre-commit-run: Run pre-commit on all files
 pre-commit-run:
 	@echo "$(BLUE)Running pre-commit on all files...$(NC)"
 	poetry run pre-commit run --all-files
+
+## pre-commit-update: Update pre-commit hook versions
+pre-commit-update:
+	@echo "$(BLUE)Updating pre-commit hook versions...$(NC)"
+	poetry run pre-commit autoupdate
+	@echo "$(GREEN)✓ Pre-commit hooks updated$(NC)"
+
+#==============================================================================
+# Security & Compliance
+#==============================================================================
+
+## audit: Run security vulnerability scan
+audit:
+	@echo "$(BLUE)Running security audit...$(NC)"
+	poetry run python scripts/audit_security.py --severity medium
+
+## audit-strict: Run security audit and fail on critical vulnerabilities
+audit-strict:
+	@echo "$(BLUE)Running strict security audit...$(NC)"
+	poetry run python scripts/audit_security.py --severity critical --fail-on-critical
+
+## sbom: Generate Software Bill of Materials
+sbom:
+	@echo "$(BLUE)Generating SBOM...$(NC)"
+	poetry run python scripts/generate_sbom.py --format json --output sbom.json --with-metadata
+
+## licenses: Generate third-party license report
+licenses:
+	@echo "$(BLUE)Generating license report...$(NC)"
+	poetry run python scripts/generate_licenses.py --format markdown --output THIRD_PARTY_LICENSES.md
+
+## compliance: Run all compliance checks (audit + sbom + licenses)
+compliance: audit sbom licenses
+	@echo "$(GREEN)✓ All compliance checks complete$(NC)"
+
+#==============================================================================
+# Performance & Benchmarking
+#==============================================================================
+
+## bench: Run performance benchmarks
+bench:
+	@echo "$(BLUE)Running performance benchmarks...$(NC)"
+	poetry run python scripts/bench_dataloader.py --num-batches 50 --output benchmark_results.json
+
+## verify-determinism: Verify deterministic behavior
+verify-determinism:
+	@echo "$(BLUE)Verifying determinism...$(NC)"
+	poetry run python scripts/verify_determinism.py
+
+## train-with-json-logs: Train with JSON-structured logging
+train-with-json-logs:
+	@echo "$(BLUE)Training with JSON-structured logging...$(NC)"
+	LOG_JSON=true poetry run python -m psy_agents_noaug.cli train
 
 #==============================================================================
 # Cleaning
@@ -432,3 +522,39 @@ tune-all-supermax:
 	@echo "Results saved to: $(HPO_OUTDIR)"
 	@echo "View with: mlflow ui --backend-store-uri sqlite:///mlflow.db"
 	@echo ""
+
+#==============================================================================
+# Docker Targets
+#==============================================================================
+
+## docker-build: Build Docker images (multi-stage)
+docker-build:
+	@echo "$(BLUE)Building Docker images...$(NC)"
+	@bash scripts/build_docker.sh
+
+## docker-test: Run tests in Docker container
+docker-test:
+	@echo "$(BLUE)Running tests in Docker...$(NC)"
+	@docker-compose -f docker-compose.test.yml run --rm test
+
+## docker-run: Run production container
+docker-run:
+	@echo "$(BLUE)Starting production container...$(NC)"
+	@docker-compose -f docker-compose.test.yml up runtime
+
+## docker-shell: Open shell in production container
+docker-shell:
+	@echo "$(BLUE)Opening shell in production container...$(NC)"
+	@docker run -it --rm psy-agents-noaug:latest /bin/bash
+
+## docker-mlflow: Start MLflow UI in Docker
+docker-mlflow:
+	@echo "$(BLUE)Starting MLflow UI...$(NC)"
+	@docker-compose -f docker-compose.test.yml --profile mlflow up mlflow
+
+## docker-clean: Clean Docker images and containers
+docker-clean:
+	@echo "$(BLUE)Cleaning Docker artifacts...$(NC)"
+	@docker-compose -f docker-compose.test.yml down -v || true
+	@docker rmi psy-agents-noaug:builder psy-agents-noaug:latest psy-agents-noaug:0.1.0 || true
+	@echo "$(GREEN)✓ Docker artifacts cleaned$(NC)"

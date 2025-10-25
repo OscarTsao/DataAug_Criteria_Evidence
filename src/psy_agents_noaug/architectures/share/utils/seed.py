@@ -1,3 +1,4 @@
+import contextlib
 import os
 import random
 
@@ -12,10 +13,8 @@ def set_seed(
     Returns the final seed used.
     """
     if env_var and (v := os.getenv(env_var)):
-        try:
+        with contextlib.suppress(ValueError):
             seed = int(v)
-        except ValueError:
-            pass
 
     try:
         import numpy as np  # type: ignore
@@ -34,10 +33,8 @@ def set_seed(
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         if deterministic:
-            try:
+            with contextlib.suppress(Exception):
                 torch.use_deterministic_algorithms(True)
-            except Exception:
-                pass
             try:
                 torch.backends.cudnn.deterministic = True
                 torch.backends.cudnn.benchmark = False

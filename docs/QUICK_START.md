@@ -93,6 +93,26 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlru
 # Then open http://localhost:5000 in your browser
 ```
 
+### On-the-fly Augmentation (Evidence)
+
+Enable CPU-light augmentation for the evidence task directly from the CLI:
+
+```bash
+psy-agents train --agent evidence --model-name bert-base-uncased \
+  --aug-lib both --aug-methods all --aug-p-apply 0.2 --aug-ops-per-sample 1 \
+  --aug-max-replace 0.3
+```
+
+During HPO you can sweep augmentation-only spaces after your baseline study:
+
+```bash
+make tune-evidence-aug
+psy-agents show-best --agent evidence --study aug-evidence-ext --topk 5
+```
+
+Augmentation decisions (methods, counts, timings) are logged to MLflow and
+an example set is saved as `augmentation/aug_examples.jsonl` in each run.
+
 ## Common Commands
 
 ### Testing
@@ -259,7 +279,7 @@ search_space:
     type: "loguniform"
     low: 1.0e-5
     high: 5.0e-5
-  
+
   batch_size:
     type: "categorical"
     choices: [8, 16, 32, 64]

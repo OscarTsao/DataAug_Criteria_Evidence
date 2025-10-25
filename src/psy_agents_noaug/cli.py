@@ -34,14 +34,46 @@ def train(
     config: str | None = typer.Option(
         None, help="Optional JSON config to override defaults"
     ),
+    aug_lib: str = typer.Option(
+        "none",
+        "--aug-lib",
+        help="Augmentation library: none|nlpaug|textattack|both",
+    ),
+    aug_methods: str = typer.Option(
+        "all",
+        "--aug-methods",
+        help="Comma separated augmenter names or 'all'",
+    ),
+    aug_p_apply: float = typer.Option(0.15, "--aug-p-apply"),
+    aug_ops_per_sample: int = typer.Option(1, "--aug-ops-per-sample"),
+    aug_max_replace: float = typer.Option(0.3, "--aug-max-replace"),
+    aug_tfidf_model: str | None = typer.Option(None, "--aug-tfidf-model"),
+    aug_reserved_map: str | None = typer.Option(None, "--aug-reserved-map"),
+    loader_workers: int | None = typer.Option(None, "--loader-workers"),
+    prefetch_factor: int | None = typer.Option(None, "--prefetch-factor"),
 ):
     """Thin wrapper expected to call the project's trainer; implement as needed."""
     outdir = _default_outdir(outdir)
     _ensure_mlflow(outdir)
-    # If you already have a training entrypoint, call it here; otherwise print a stub:
+
+    methods = [m.strip() for m in aug_methods.split(",") if m.strip()]
+    if not methods:
+        methods = ["all"]
+
     typer.echo(
         f"[train] agent={agent} model={model_name} epochs={epochs} seed={seed} outdir={outdir}"
     )
+    typer.echo(
+        f"[train] augment lib={aug_lib} methods={methods} p_apply={aug_p_apply:.2f} ops={aug_ops_per_sample} max_replace={aug_max_replace:.2f}"
+    )
+    if loader_workers is not None or prefetch_factor is not None:
+        typer.echo(
+            f"[train] dataloader workers={loader_workers} prefetch={prefetch_factor}"
+        )
+    if aug_tfidf_model:
+        typer.echo(f"[train] aug tfidf model={aug_tfidf_model}")
+    if aug_reserved_map:
+        typer.echo(f"[train] aug reserved map={aug_reserved_map}")
     if config:
         cfg = json.loads(Path(config).read_text())
         typer.echo(f"[train] loaded config keys: {list(cfg.keys())}")
@@ -59,11 +91,30 @@ def tune(
         None, help="Optuna storage URL (e.g., sqlite:///path/to.db)"
     ),
     multi_objective: bool = typer.Option(False),
+    from_best_of: str | None = typer.Option(
+        None, "--from-best-of", help="Seed augmentation sweep from another study"
+    ),
+    hpo_augment_only: bool = typer.Option(
+        False, "--hpo-augment-only", help="Search augmentation params only"
+    ),
+    aug_lib: str = typer.Option("none", "--aug-lib"),
+    aug_methods: str = typer.Option("all", "--aug-methods"),
+    aug_p_apply: float = typer.Option(0.15, "--aug-p-apply"),
+    aug_ops_per_sample: int = typer.Option(1, "--aug-ops-per-sample"),
+    aug_max_replace: float = typer.Option(0.3, "--aug-max-replace"),
 ):
     """Invoke the maximal HPO driver (scripts/tune_max.py)."""
     outdir = _default_outdir(outdir)
     _ensure_mlflow(outdir)
     storage = storage or f"sqlite:///{Path('./_optuna/noaug.db').absolute()}"
+    typer.echo(
+        f"[tune] agent={agent} study={study} augment-lib={aug_lib} methods={aug_methods}"
+    )
+    if from_best_of:
+        typer.echo(f"[tune] initializing from study={from_best_of}")
+    if hpo_augment_only:
+        typer.echo("[tune] restricting search space to augmentation parameters")
+
     cmd = [
         "python",
         "scripts/tune_max.py",

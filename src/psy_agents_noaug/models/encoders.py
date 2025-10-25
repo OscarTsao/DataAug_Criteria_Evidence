@@ -3,7 +3,7 @@
 from typing import Any
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
 try:  # Optional dependency for LoRA
@@ -155,12 +155,10 @@ class TransformerEncoder(nn.Module):
 
         # Encode
         with torch.no_grad():
-            embeddings = self.forward(
+            return self.forward(
                 input_ids=encoded["input_ids"],
                 attention_mask=encoded["attention_mask"],
             )
-
-        return embeddings
 
 
 class BERTEncoder(TransformerEncoder):

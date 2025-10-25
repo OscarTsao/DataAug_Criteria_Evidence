@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.data import Dataset
@@ -13,6 +13,9 @@ from psy_agents_noaug.architectures.utils import (
     resolve_criterion_text,
 )
 from psy_agents_noaug.architectures.utils.dsm_criteria import DEFAULT_DSM_CRITERIA_PATH
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 DEFAULT_DATASET_PATH = (
     Path(__file__).resolve().parents[5]
@@ -95,7 +98,7 @@ class JointDataset(Dataset):
                 raise ValueError(
                     f"The dataset file {self.csv_path} is missing a header row."
                 )
-            self.examples: list[dict[str, str]] = [row for row in reader]
+            self.examples: list[dict[str, str]] = list(reader)
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")

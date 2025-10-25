@@ -30,7 +30,7 @@ class ClassificationHead(torch.nn.Module):
         dims = (input_dim,) + hidden_dims
 
         hidden_layers = []
-        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+        for in_dim, out_dim in zip(dims[:-1], dims[1:], strict=False):
             hidden_layers.append(torch.nn.Linear(in_dim, out_dim))
             hidden_layers.append(torch.nn.GELU())
             hidden_layers.append(torch.nn.Dropout(dropout_prob))
@@ -83,7 +83,7 @@ class Model(torch.nn.Module):
                 if isinstance(hidden, int):
                     # Single value: create uniform hidden dims
                     classifier_hidden_dims = (hidden,) * (classifier_layer_num - 1)
-                elif isinstance(hidden, (list, tuple)):
+                elif isinstance(hidden, list | tuple):
                     # Sequence: use as provided
                     classifier_hidden_dims = tuple(hidden)
 
@@ -120,5 +120,4 @@ class Model(torch.nn.Module):
         pooled_output = outputs.pooler_output
         if pooled_output is None:
             pooled_output = outputs.last_hidden_state[:, 0, :]
-        logits = self.classifier(pooled_output)
-        return logits
+        return self.classifier(pooled_output)

@@ -80,10 +80,9 @@ class OptunaRunner:
                 multivariate=config.get("multivariate", True),
                 group=config.get("group", True),
             )
-        elif sampler_type == "random":
+        if sampler_type == "random":
             return optuna.samplers.RandomSampler()
-        else:
-            raise ValueError(f"Unknown sampler type: {sampler_type}")
+        raise ValueError(f"Unknown sampler type: {sampler_type}")
 
     def _create_pruner(
         self, config: dict[str, Any] | None
@@ -100,16 +99,15 @@ class OptunaRunner:
                 n_warmup_steps=config.get("n_warmup_steps", 2),
                 interval_steps=config.get("interval_steps", 1),
             )
-        elif pruner_type == "hyperband":
+        if pruner_type == "hyperband":
             return HyperbandPruner(
                 min_resource=config.get("min_resource", 1),
                 max_resource=config.get("max_resource", 10),
                 reduction_factor=config.get("reduction_factor", 3),
             )
-        elif pruner_type is None or pruner_type == "none":
+        if pruner_type is None or pruner_type == "none":
             return None
-        else:
-            raise ValueError(f"Unknown pruner type: {pruner_type}")
+        raise ValueError(f"Unknown pruner type: {pruner_type}")
 
     def suggest_hyperparameters(
         self,
@@ -351,5 +349,4 @@ def create_search_space_from_config(config: DictConfig) -> dict[str, dict[str, A
     if not hasattr(config, "search_space"):
         return {}
 
-    search_space = OmegaConf.to_container(config.search_space, resolve=True)
-    return search_space
+    return OmegaConf.to_container(config.search_space, resolve=True)

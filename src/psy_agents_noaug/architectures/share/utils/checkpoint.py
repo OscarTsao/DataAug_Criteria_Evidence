@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
-import torch
-from torch import nn
-from transformers import PreTrainedTokenizerBase
+from typing import TYPE_CHECKING, Any
 
 from psy_agents_noaug.architectures.utils import (
     BestModelSaver,
@@ -16,6 +12,11 @@ from psy_agents_noaug.architectures.utils import (
     save_training_state,
     training_state_exists,
 )
+
+if TYPE_CHECKING:
+    import torch
+    from torch import nn
+    from transformers import PreTrainedTokenizerBase
 
 PROJECT_NAME = "share"
 DEFAULT_FILENAME = "best_model.pt"

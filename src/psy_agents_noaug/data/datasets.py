@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandas as pd
 import torch
 from torch.utils.data import Dataset
-from transformers import PreTrainedTokenizerBase
+from torch.utils.data._utils.collate import default_collate
+
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    from collections.abc import Iterable, Mapping, Sequence
+    from pathlib import Path
+
+    import pandas as pd
+    from transformers import PreTrainedTokenizerBase
+
+    from psy_agents_noaug.augmentation import AugmenterPipeline
 
 
 @dataclass
@@ -34,6 +41,8 @@ class ClassificationDataset(Dataset):
         text_pair_column: str | None = None,
         label_column: str = "label",
         label_dtype: str = "int",
+        augmenter: AugmenterPipeline | None = None,
+        lazy_encode: bool = False,
     ) -> None:
         if dataframe.empty:
             raise ValueError("Received empty dataframe for dataset construction")
@@ -45,17 +54,29 @@ class ClassificationDataset(Dataset):
             else None
         )
 
-        encoded = tokenizer(
-            texts,
-            text_pair=text_pairs,
-            padding="max_length",
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt",
-        )
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.text_column = text_column
+        self.text_pair_column = text_pair_column
+        self.lazy_encode = bool(lazy_encode)
+        self.augmenter = augmenter
+        self._texts = texts
+        self._text_pairs = text_pairs
 
-        self.input_ids = encoded["input_ids"]
-        self.attention_mask = encoded["attention_mask"]
+        if self.lazy_encode:
+            self.input_ids = None
+            self.attention_mask = None
+        else:
+            encoded = tokenizer(
+                texts,
+                text_pair=text_pairs,
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+                return_tensors="pt",
+            )
+            self.input_ids = encoded["input_ids"]
+            self.attention_mask = encoded["attention_mask"]
 
         if label_dtype == "float":
             labels = torch.tensor(
@@ -90,11 +111,18 @@ class ClassificationDataset(Dataset):
         return self.labels.size(0)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        item: dict[str, object] = {
-            "input_ids": self.input_ids[idx],
-            "attention_mask": self.attention_mask[idx],
-            "labels": self.labels[idx],
-        }
+        if self.lazy_encode:
+            item: dict[str, object] = {
+                "text": self._texts[idx],
+                "text_pair": self._text_pairs[idx] if self._text_pairs else None,
+                "labels": self.labels[idx],
+            }
+        else:
+            item = {
+                "input_ids": self.input_ids[idx],
+                "attention_mask": self.attention_mask[idx],
+                "labels": self.labels[idx],
+            }
 
         if self.criterion_indices is not None:
             item["criterion_index"] = self.criterion_indices[idx]
@@ -106,6 +134,81 @@ class ClassificationDataset(Dataset):
             item["criterion_id"] = self.criterion_ids[idx]
 
         return item  # type: ignore[return-value]
+
+
+def create_classification_collate(
+    tokenizer: PreTrainedTokenizerBase,
+    max_length: int,
+    *,
+    has_text_pair: bool,
+    augmenter: AugmenterPipeline | None = None,
+):
+    """Create collate_fn that handles optional augmentation before tokenization."""
+
+    def _collate(batch: list[dict[str, object]]) -> dict[str, torch.Tensor]:
+        if not batch:
+            raise ValueError("Received empty batch in collate function")
+
+        # If samples are already tokenized, fall back to default behaviour.
+        first = batch[0]
+        if "input_ids" in first and "attention_mask" in first:
+            return default_collate(batch)  # type: ignore[return-value]
+
+        texts: list[str] = []
+        pairs: list[str] | None = [] if has_text_pair else None
+        labels: list[torch.Tensor] = []
+
+        criterion_indices: list[torch.Tensor] = []
+        post_ids: list[str] = []
+        criterion_ids: list[str] = []
+
+        for sample in batch:
+            text = str(sample["text"])
+            if augmenter is not None:
+                text = augmenter(text)
+            texts.append(text)
+
+            if has_text_pair and pairs is not None:
+                pair_val = sample.get("text_pair")
+                pairs.append("" if pair_val is None else str(pair_val))
+
+            labels.append(sample["labels"])
+
+            if "criterion_index" in sample:
+                criterion_indices.append(sample["criterion_index"])
+            if "post_id" in sample:
+                post_ids.append(str(sample["post_id"]))
+            if "criterion_id" in sample:
+                criterion_ids.append(str(sample["criterion_id"]))
+
+        encoding_kwargs = {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": max_length,
+            "return_tensors": "pt",
+        }
+
+        if has_text_pair and pairs:
+            encoded = tokenizer(texts, text_pair=pairs, **encoding_kwargs)
+        else:
+            encoded = tokenizer(texts, **encoding_kwargs)
+
+        batch_dict: dict[str, torch.Tensor | list[str]] = {
+            "input_ids": encoded["input_ids"],
+            "attention_mask": encoded["attention_mask"],
+            "labels": torch.stack(labels),
+        }
+
+        if criterion_indices:
+            batch_dict["criterion_index"] = torch.stack(criterion_indices)
+        if post_ids:
+            batch_dict["post_id"] = post_ids
+        if criterion_ids:
+            batch_dict["criterion_id"] = criterion_ids
+
+        return batch_dict  # type: ignore[return-value]
+
+    return _collate
 
 
 def load_splits(splits_path: Path) -> dict[str, list[str]]:
@@ -228,6 +331,7 @@ def build_datasets(
     criteria_groundtruth: pd.DataFrame,
     evidence_groundtruth: pd.DataFrame,
     splits: Mapping[str, Sequence[str]],
+    evidence_augmenter: AugmenterPipeline | None = None,
 ) -> tuple[DatasetSplits, dict[str, int], dict[int, str]]:
     """Build tokenized datasets for the requested task."""
     posts = rename_post_columns(posts_df, field_map["posts"])
@@ -324,6 +428,8 @@ def build_datasets(
                 text_pair_column="criterion_text",
                 label_column="label",
                 label_dtype="int",
+                augmenter=evidence_augmenter,
+                lazy_encode=evidence_augmenter is not None,
             ),
             val=ClassificationDataset(
                 val_df,

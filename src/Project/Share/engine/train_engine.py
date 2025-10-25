@@ -34,7 +34,7 @@ def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         accumulator[prefix] = ",".join(map(str, value))
     else:
         accumulator[prefix] = value
@@ -337,7 +337,7 @@ def _evaluate(
     )
     joint_score = (cls_metrics["f1"] + span_metrics["span_em"]) / 2
 
-    metrics = {
+    return {
         "loss": float(np.mean(losses)) if losses else 0.0,
         "criteria_accuracy": cls_metrics["accuracy"],
         "criteria_precision": cls_metrics["precision"],
@@ -348,7 +348,6 @@ def _evaluate(
         "evidence_span_em": span_metrics["span_em"],
         "joint_score": joint_score,
     }
-    return metrics
 
 
 def train(

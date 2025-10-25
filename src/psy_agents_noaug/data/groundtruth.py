@@ -185,9 +185,8 @@ def create_criteria_groundtruth(
                 "fail_on_invalid_criterion_id", True
             ):
                 raise ValueError(f"Invalid criterion IDs found: {invalid_ids}")
-            else:
-                print(f"WARNING: Invalid criterion IDs found: {invalid_ids}")
-                df = df[df["criterion_id"].isin(valid_criterion_ids)].copy()
+            print(f"WARNING: Invalid criterion IDs found: {invalid_ids}")
+            df = df[df["criterion_id"].isin(valid_criterion_ids)].copy()
 
     # Validate post IDs exist in posts
     post_ids_set = set(posts[field_map["posts"]["post_id"]])
@@ -197,11 +196,10 @@ def create_criteria_groundtruth(
             raise ValueError(
                 f"Post IDs in annotations not found in posts: {missing_posts}"
             )
-        else:
-            print(
-                f"WARNING: Dropping {len(missing_posts)} annotations with missing post_ids"
-            )
-            df = df[df["post_id"].isin(post_ids_set)].copy()
+        print(
+            f"WARNING: Dropping {len(missing_posts)} annotations with missing post_ids"
+        )
+        df = df[df["post_id"].isin(post_ids_set)].copy()
 
     # Handle duplicates
     if field_map.get("validation", {}).get("drop_duplicates", True):
@@ -308,9 +306,8 @@ def create_evidence_groundtruth(
                 "fail_on_invalid_criterion_id", True
             ):
                 raise ValueError(f"Invalid criterion IDs found: {invalid_ids}")
-            else:
-                print(f"WARNING: Invalid criterion IDs found: {invalid_ids}")
-                df = df[df["criterion_id"].isin(valid_criterion_ids)].copy()
+            print(f"WARNING: Invalid criterion IDs found: {invalid_ids}")
+            df = df[df["criterion_id"].isin(valid_criterion_ids)].copy()
 
     # Validate post IDs exist in posts
     post_ids_set = set(posts[field_map["posts"]["post_id"]])
@@ -320,9 +317,8 @@ def create_evidence_groundtruth(
             raise ValueError(
                 f"Post IDs in annotations not found in posts: {missing_posts}"
             )
-        else:
-            print("WARNING: Dropping annotations with missing post_ids")
-            df = df[df["post_id"].isin(post_ids_set)].copy()
+        print("WARNING: Dropping annotations with missing post_ids")
+        df = df[df["post_id"].isin(post_ids_set)].copy()
 
     # Drop cases_parsed column
     df = df.drop("cases_parsed", axis=1)

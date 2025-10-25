@@ -58,8 +58,7 @@ class EarlyStopping:
             return True
         if self.mode == "max":
             return value > self.best + self.min_delta
-        else:
-            return value < self.best - self.min_delta
+        return value < self.best - self.min_delta
 
     def step(self, value: float) -> bool:
         if self.improved(value):
@@ -334,7 +333,7 @@ def suggest_joint(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     cfg_c = suggest_criteria(trial, model_name)
     share_ratio = trial.suggest_float("joint.share_ratio", 0.0, 1.0)
     multi_task_weight = trial.suggest_float("joint.criteria_weight", 0.2, 0.8)
-    cfg = {
+    return {
         "task": "joint",
         "model": {"name": model_name},
         "shared": {"ratio": share_ratio, "criteria_weight": multi_task_weight},
@@ -346,7 +345,6 @@ def suggest_joint(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
         "regularization": cfg_e["regularization"],
         "train": cfg_e["train"],
     }
-    return cfg
 
 
 def build_config(trial: optuna.Trial, agent: str) -> dict[str, Any]:
@@ -383,7 +381,7 @@ def run_training_eval(
     from pathlib import Path
 
     import torch
-    import torch.nn as nn
+    from torch import nn
     from torch.utils.data import DataLoader, random_split
     from transformers import AutoTokenizer
 
@@ -452,7 +450,7 @@ def run_training_eval(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True if torch.cuda.is_available() else False,
+        pin_memory=bool(torch.cuda.is_available()),
     )
 
     val_loader = DataLoader(
@@ -460,17 +458,11 @@ def run_training_eval(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True if torch.cuda.is_available() else False,
+        pin_memory=bool(torch.cuda.is_available()),
     )
 
     # Create model based on task
-    if task in ("criteria", "share", "joint"):
-        model = CriteriaModel(
-            model_name=model_name,
-            num_labels=num_labels,
-            dropout=cfg["regularization"]["dropout"],
-        ).to(device)
-    elif task == "evidence":
+    if task in ("criteria", "share", "joint") or task == "evidence":
         model = CriteriaModel(
             model_name=model_name,
             num_labels=num_labels,
@@ -492,9 +484,7 @@ def run_training_eval(
             betas=(cfg["optim"].get("beta1", 0.9), cfg["optim"].get("beta2", 0.999)),
             eps=cfg["optim"].get("eps", 1e-8),
         )
-    elif optim_name in ("adamw_8bit", "lion"):
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
-    elif optim_name == "adafactor":
+    elif optim_name in ("adamw_8bit", "lion") or optim_name == "adafactor":
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)

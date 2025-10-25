@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -15,6 +14,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 

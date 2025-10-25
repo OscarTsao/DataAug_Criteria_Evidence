@@ -66,7 +66,7 @@ class Model(nn.Module):
         criteria_drop = criteria_cfg.get("dropout", criteria_dropout)
 
         evidence_hidden = evidence_cfg.get("hidden")
-        if isinstance(evidence_hidden, (list, tuple)):
+        if isinstance(evidence_hidden, list | tuple):
             default_evidence_layers = len(evidence_hidden) + 1
         elif evidence_hidden is not None and "layers" not in evidence_cfg:
             default_evidence_layers = 2

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 DEFAULT_DATASET_PATH = (
     Path(__file__).resolve().parents[4]
@@ -80,7 +83,7 @@ class JointDataset(Dataset):
                 raise ValueError(
                     f"The dataset file {self.csv_path} is missing a header row."
                 )
-            self.examples: list[dict[str, str]] = [row for row in reader]
+            self.examples: list[dict[str, str]] = list(reader)
 
         if not self.examples:
             raise ValueError(f"No rows found in dataset file {self.csv_path}.")

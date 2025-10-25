@@ -5,10 +5,9 @@ import random
 import time
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import optuna
 import torch
 from torch import nn
 from torch.cuda.amp import GradScaler, autocast
@@ -23,20 +22,21 @@ from Project.Criteria.utils import (
     enable_autologging,
     get_artifact_dir,
     get_logger,
-    load_best_model,
     load_training_state,
     mlflow_run,
-    save_training_state,
     set_seed,
     training_state_exists,
 )
 
+if TYPE_CHECKING:
+    import optuna
 
-def _flatten_dict(prefix: str, value: Any, accumulator: Dict[str, Any]) -> None:
+
+def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         accumulator[prefix] = ",".join(map(str, value))
     else:
         accumulator[prefix] = value
@@ -49,10 +49,10 @@ def _seed_worker(worker_id: int) -> None:
 
 
 def _prepare_datasets(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     tokenizer: AutoTokenizer,
     seed: int,
-) -> Tuple[Dataset, Dataset, Optional[Dataset]]:
+) -> tuple[Dataset, Dataset, Dataset | None]:
     dataset_cfg = config.get("dataset", {})
     splits = dataset_cfg.get("splits", [0.8, 0.1, 0.1])
     if isinstance(splits, dict):
@@ -96,12 +96,12 @@ def _prepare_datasets(
 def _create_dataloaders(
     train_dataset: Dataset,
     val_dataset: Dataset,
-    test_dataset: Optional[Dataset],
+    test_dataset: Dataset | None,
     *,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     seed: int,
     device: torch.device,
-) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     dataset_cfg = config.get("dataset", {})
     training_cfg = config.get("training", {})
     num_workers = dataset_cfg.get("num_workers", 0)
@@ -150,7 +150,7 @@ def _create_dataloaders(
     return train_loader, val_loader, test_loader
 
 
-def _build_model(config: Dict[str, Any]) -> Model:
+def _build_model(config: dict[str, Any]) -> Model:
     model_cfg = config.get("model", {})
     model_name = model_cfg.get("pretrained_model", "bert-base-uncased")
     num_labels = model_cfg.get("num_labels", 2)
@@ -163,7 +163,7 @@ def _build_model(config: Dict[str, Any]) -> Model:
     )
 
 
-def _select_device(config: Dict[str, Any]) -> torch.device:
+def _select_device(config: dict[str, Any]) -> torch.device:
     preferred = config.get("training", {}).get("device")
     if preferred:
         return torch.device(preferred)
@@ -175,7 +175,7 @@ def _select_device(config: Dict[str, Any]) -> torch.device:
 
 
 def _create_optimizer(
-    model: nn.Module, config: Dict[str, Any]
+    model: nn.Module, config: dict[str, Any]
 ) -> torch.optim.Optimizer:
     training_cfg = config.get("training", {})
     optimizer_cfg = training_cfg.get("optimizer", {}) or {}
@@ -231,9 +231,9 @@ def _create_optimizer(
 
 def _create_scheduler(
     optimizer: torch.optim.Optimizer,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     num_training_steps: int,
-) -> Optional[Any]:
+) -> Any | None:
     scheduler_cfg = config.get("training", {}).get("scheduler", {}) or {}
     scheduler_name = scheduler_cfg.get("name", "linear")
     if scheduler_name in (None, "", "none"):
@@ -259,7 +259,7 @@ def _create_scheduler(
 
 def _classification_metrics(
     predictions: torch.Tensor, targets: torch.Tensor
-) -> Dict[str, float]:
+) -> dict[str, float]:
     preds = predictions.argmax(dim=-1)
     correct = (preds == targets).sum().item()
     total = targets.numel()
@@ -287,11 +287,11 @@ def _evaluate(
     device: torch.device,
     loss_fn: nn.Module,
     amp_enabled: bool,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     model.eval()
-    losses: List[float] = []
-    all_preds: List[torch.Tensor] = []
-    all_labels: List[torch.Tensor] = []
+    losses: list[float] = []
+    all_preds: list[torch.Tensor] = []
+    all_labels: list[torch.Tensor] = []
 
     autocast_enabled = amp_enabled and device.type == "cuda"
 
@@ -317,8 +317,8 @@ def _evaluate(
 
 
 def _move_batch_to_device(
-    batch: Dict[str, torch.Tensor], device: torch.device
-) -> Dict[str, torch.Tensor]:
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> dict[str, torch.Tensor]:
     return {
         key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in batch.items()
@@ -326,11 +326,11 @@ def _move_batch_to_device(
 
 
 def train(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *,
-    trial: Optional[optuna.Trial] = None,
+    trial: optuna.Trial | None = None,
     resume: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     logger = get_logger(__name__)
     training_cfg = config.get("training", {})
     deterministic = training_cfg.get("deterministic", True)
@@ -416,13 +416,12 @@ def train(
         )
         enable_autologging()
 
-    flatten_config: Dict[str, Any] = {}
+    flatten_config: dict[str, Any] = {}
     _flatten_dict(
         "", {k: v for k, v in config.items() if k != "mlflow"}, flatten_config
     )
 
-    runtime_metrics: Dict[str, Any] = {}
-    start_time = time.time()
+    time.time()
 
     with (
         mlflow_run(name=config.get("project", "criteria"))
@@ -440,8 +439,8 @@ def train(
             optimizer.zero_grad(set_to_none=True)
 
             epoch_loss = 0.0
-            epoch_preds: List[torch.Tensor] = []
-            epoch_labels: List[torch.Tensor] = []
+            epoch_preds: list[torch.Tensor] = []
+            epoch_labels: list[torch.Tensor] = []
 
             for step, batch in enumerate(train_loader):
                 batch = _move_batch_to_device(batch, device)
@@ -496,5 +495,5 @@ def train(
             train_metrics["loss"] = epoch_loss / max(1, len(train_loader))
 
             val_metrics = _evaluate(model, val_loader, device, loss_fn, amp_enabled)
-            prefixed_train = {f"train_{k}": v for k, v in train_metrics.items()}
-            prefixed_val = {f"validation_{k}": v for k, v in val_metrics.items()}
+            {f"train_{k}": v for k, v in train_metrics.items()}
+            {f"validation_{k}": v for k, v in val_metrics.items()}

@@ -98,8 +98,7 @@ def main(cfg: DictConfig):
         print(f"\nTrial {trial.number}: {params}")
 
         # Import training modules
-        import torch.nn as nn
-        import torch.optim as optim
+        from torch import nn, optim
         from torch.utils.data import DataLoader, random_split
         from transformers import AutoTokenizer
 

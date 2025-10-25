@@ -1,5 +1,14 @@
 """Data loading and processing modules."""
 
+from .augmentation_utils import (
+    AugmentationArtifacts,
+    build_evidence_augmenter,
+    resolve_methods,
+)
+from .classification_loader import (
+    ClassificationLoaders,
+    build_evidence_classification_loaders,
+)
 from .groundtruth import (
     GroundTruthValidator,
     create_criteria_groundtruth,
@@ -19,4 +28,9 @@ __all__ = [
     "load_field_map",
     "GroundTruthValidator",
     "DataSplitter",
+    "AugmentationArtifacts",
+    "build_evidence_augmenter",
+    "resolve_methods",
+    "ClassificationLoaders",
+    "build_evidence_classification_loaders",
 ]

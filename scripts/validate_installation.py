@@ -25,7 +25,7 @@ def main():
 
     print("Checking core dependencies:")
     print("-" * 60)
-    
+
     required_modules = [
         "torch",
         "transformers",
@@ -68,16 +68,15 @@ def main():
 
     print()
     print("=" * 60)
-    
+
     if all(results):
         print("✓ All required dependencies are installed!")
         print("=" * 60)
         return 0
-    else:
-        print("✗ Some dependencies are missing. Please run:")
-        print("  poetry install")
-        print("=" * 60)
-        return 1
+    print("✗ Some dependencies are missing. Please run:")
+    print("  poetry install")
+    print("=" * 60)
+    return 1
 
 
 if __name__ == "__main__":
