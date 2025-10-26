@@ -120,9 +120,30 @@ RERANKERS = ["sum", "product", "softmax"]
 # Optional head narrowing via env JSON (for hybrid trust-region)
 _HEAD_LIMITS = json.loads(os.environ.get("HPO_HEAD_LIMITS_JSON", "{}"))
 
+# Augmentation configuration
+AUG_LIBS = ["none", "nlpaug", "textattack", "both"]
+AUG_METHODS_NLPAUG = [
+    "KeyboardAug",
+    "OcrAug",
+    "RandomCharAug",
+    "RandomWordAug",
+    "SpellingAug",
+    "SplitAug",
+    "SynonymAug",
+    "TfIdfAug",
+]
+AUG_METHODS_TEXTATTACK = [
+    "DeletionAugmenter",
+    "SwapAugmenter",
+    "SynonymInsertionAugmenter",
+    "EasyDataAugmenter",
+    "CheckListAugmenter",
+]
+
 
 def suggest_common(trial: optuna.Trial, heavy_model: bool) -> dict[str, Any]:
-    max_len = trial.suggest_int("tok.max_length", 128, 1024, step=32)
+    # Cap at 512 for transformer models (RoBERTa, BERT, DeBERTa all use 512 max)
+    max_len = trial.suggest_int("tok.max_length", 128, 512, step=32)
     stride = trial.suggest_int("tok.doc_stride", 32, min(256, max_len // 2), step=16)
     fast_tok = trial.suggest_categorical("tok.use_fast", [True, False])
 
@@ -196,9 +217,95 @@ def suggest_common(trial: optuna.Trial, heavy_model: bool) -> dict[str, Any]:
     }
 
 
+def suggest_augmentation(trial: optuna.Trial) -> dict[str, Any]:
+    """Suggest augmentation hyperparameters.
+
+    Args:
+        trial: Optuna trial object
+
+    Returns:
+        Dictionary with augmentation configuration
+    """
+    aug_enabled = trial.suggest_categorical("aug.enabled", [True, False])
+
+    if not aug_enabled:
+        return {"augmentation": {"enabled": False}}
+
+    # Select augmentation library
+    aug_lib = trial.suggest_categorical("aug.lib", AUG_LIBS[1:])  # Exclude "none"
+
+    # Core augmentation parameters
+    p_apply = trial.suggest_float("aug.p_apply", 0.05, 0.30)
+    ops_per_sample = trial.suggest_int("aug.ops_per_sample", 1, 2)
+    max_replace = trial.suggest_float("aug.max_replace_ratio", 0.1, 0.5)
+
+    # Select methods based on library
+    methods = []
+
+    if aug_lib in ("nlpaug", "both"):
+        n_nlpaug = trial.suggest_int(
+            "aug.n_nlpaug_methods", 1, min(3, len(AUG_METHODS_NLPAUG))
+        )
+        # Sample subset of nlpaug methods
+        selected_nlpaug = trial.suggest_categorical(
+            "aug.nlpaug_method_1",
+            AUG_METHODS_NLPAUG,
+        )
+        methods.append(selected_nlpaug)
+
+        if n_nlpaug >= 2:
+            remaining = [m for m in AUG_METHODS_NLPAUG if m != selected_nlpaug]
+            selected_nlpaug_2 = trial.suggest_categorical(
+                "aug.nlpaug_method_2",
+                remaining,
+            )
+            methods.append(selected_nlpaug_2)
+
+        if n_nlpaug >= 3:
+            remaining = [m for m in AUG_METHODS_NLPAUG if m not in methods]
+            selected_nlpaug_3 = trial.suggest_categorical(
+                "aug.nlpaug_method_3",
+                remaining,
+            )
+            methods.append(selected_nlpaug_3)
+
+    if aug_lib in ("textattack", "both"):
+        n_textattack = trial.suggest_int(
+            "aug.n_textattack_methods", 1, min(2, len(AUG_METHODS_TEXTATTACK))
+        )
+        # Sample subset of textattack methods
+        selected_ta = trial.suggest_categorical(
+            "aug.textattack_method_1",
+            AUG_METHODS_TEXTATTACK,
+        )
+        methods.append(selected_ta)
+
+        if n_textattack >= 2:
+            remaining = [m for m in AUG_METHODS_TEXTATTACK if m != selected_ta]
+            selected_ta_2 = trial.suggest_categorical(
+                "aug.textattack_method_2",
+                remaining,
+            )
+            methods.append(selected_ta_2)
+
+    return {
+        "augmentation": {
+            "enabled": True,
+            "lib": aug_lib,
+            "methods": methods,
+            "p_apply": p_apply,
+            "ops_per_sample": ops_per_sample,
+            "max_replace_ratio": max_replace,
+            "scope": "train_only",  # Fixed - never augment val/test
+            "seed": None,  # Will use global seed
+        }
+    }
+
+
 def suggest_criteria(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     heavy = any(k in model_name for k in ["-large", "large", "xlm-roberta"])
     com = suggest_common(trial, heavy)
+    aug = suggest_augmentation(trial)  # Add augmentation
     pooling = trial.suggest_categorical("head.pooling", POOLING)
     head_layers = trial.suggest_int(
         "head.layers",
@@ -246,6 +353,7 @@ def suggest_criteria(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
             "alpha": focal_alpha,
             "balance": class_balance,
         },
+        **aug,
         **com,
         "train": {**com["train"], "epochs": epochs},
     }
@@ -254,6 +362,7 @@ def suggest_criteria(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
 def suggest_evidence(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
     heavy = any(k in model_name for k in ["-large", "large", "xlm-roberta"])
     com = suggest_common(trial, heavy)
+    aug = suggest_augmentation(trial)
     head_layers = trial.suggest_int(
         "head.layers",
         int(_HEAD_LIMITS.get("layers_min", 1)),
@@ -323,6 +432,7 @@ def suggest_evidence(trial: optuna.Trial, model_name: str) -> dict[str, Any]:
             "nms_iou": nms_iou,
             "neg_ratio": neg_ratio,
         },
+        **aug,
         **com,
         "train": {**com["train"], "epochs": epochs},
     }
@@ -440,10 +550,11 @@ def run_training_eval(
         dataset, [train_size, val_size, test_size], generator=generator
     )
 
-    # Create dataloaders
-    num_workers = (
-        min(4, torch.cuda.device_count() * 2) if torch.cuda.is_available() else 2
-    )
+    # Create dataloaders with optimized workers
+    # Use environment variable or auto-detect based on CPU cores
+    num_workers = int(
+        os.getenv("NUM_WORKERS", "18")
+    )  # 18 workers for 20-core system (90% CPU, 2 cores for system/monitoring)
 
     train_loader = DataLoader(
         train_dataset,
@@ -451,6 +562,8 @@ def run_training_eval(
         shuffle=True,
         num_workers=num_workers,
         pin_memory=bool(torch.cuda.is_available()),
+        persistent_workers=num_workers > 0,  # Keep workers alive
+        prefetch_factor=4 if num_workers > 0 else None,  # Increased prefetch
     )
 
     val_loader = DataLoader(
@@ -459,14 +572,19 @@ def run_training_eval(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=bool(torch.cuda.is_available()),
+        persistent_workers=num_workers > 0,
+        prefetch_factor=4 if num_workers > 0 else None,
     )
 
     # Create model based on task
     if task in ("criteria", "share", "joint") or task == "evidence":
+        # Use head_cfg for HPO compatibility
+        head_cfg = cfg.get("head", {})
+        task_cfg = {"num_labels": num_labels}
         model = CriteriaModel(
             model_name=model_name,
-            num_labels=num_labels,
-            dropout=cfg["regularization"]["dropout"],
+            head_cfg=head_cfg,
+            task_cfg=task_cfg,
         ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -489,9 +607,18 @@ def run_training_eval(
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
 
-    # Training loop with EarlyStopping
+    # Training loop with EarlyStopping and Mixed Precision
     start = time.time()
     best = 0.0
+
+    # Enable mixed precision for RTX 4090 (Ampere architecture supports bfloat16)
+    use_amp = bool(torch.cuda.is_available())
+    dtype = (
+        torch.bfloat16
+        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+        else torch.float16
+    )
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     for epoch in range(epochs):
         # Training
@@ -504,19 +631,33 @@ def run_training_eval(
             labels = batch["labels"].to(device)
 
             optimizer.zero_grad()
-            logits = model(input_ids, attention_mask)
-            loss = criterion(logits, labels)
-            loss.backward()
 
-            if cfg["train"].get("clip_grad", 0.0) > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), cfg["train"]["clip_grad"]
-                )
+            # Mixed precision forward pass
+            with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
+                logits = model(input_ids, attention_mask)
+                loss = criterion(logits, labels)
 
-            optimizer.step()
+            # Mixed precision backward pass
+            if use_amp and scaler:
+                scaler.scale(loss).backward()
+                if cfg["train"].get("clip_grad", 0.0) > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), cfg["train"]["clip_grad"]
+                    )
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                if cfg["train"].get("clip_grad", 0.0) > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), cfg["train"]["clip_grad"]
+                    )
+                optimizer.step()
+
             total_loss += loss.item()
 
-        # Validation
+        # Validation with mixed precision
         model.eval()
         all_preds = []
         all_labels = []
@@ -528,8 +669,11 @@ def run_training_eval(
                 attention_mask = batch["attention_mask"].to(device)
                 labels = batch["labels"].to(device)
 
-                logits = model(input_ids, attention_mask)
-                loss = criterion(logits, labels)
+                # Use AMP for inference too
+                with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
+                    logits = model(input_ids, attention_mask)
+                    loss = criterion(logits, labels)
+
                 val_loss += loss.item()
 
                 preds = logits.argmax(dim=1)
@@ -596,18 +740,57 @@ def objective_builder(
         def _cb(epoch, primary, secondary=None):
             on_epoch(trial, epoch, primary, secondary)
 
-        res = run_training_eval(cfg, {"on_epoch": _cb})
+        try:
+            res = run_training_eval(cfg, {"on_epoch": _cb})
 
-        if _HAS_MLFLOW:
-            mlflow.log_metrics(
-                {
-                    "final_primary": res["primary"],
-                    "runtime_s": res.get("runtime_s", float("nan")),
-                }
+            if _HAS_MLFLOW:
+                mlflow.log_metrics(
+                    {
+                        "final_primary": res["primary"],
+                        "runtime_s": res.get("runtime_s", float("nan")),
+                    }
+                )
+                mlflow.end_run()
+
+            return res["primary"]
+
+        except (RuntimeError, ValueError, AttributeError, TypeError, KeyError) as e:
+            # Handle configuration errors (max_length > model max, missing attributes, etc.)
+            import traceback
+
+            error_msg = f"{type(e).__name__}: {str(e)}"
+            print(
+                f"\n[ERROR] Trial {trial.number} failed with config error: {error_msg}"
             )
-            mlflow.end_run()
+            if "expanded size" in str(e) or "max_position_embeddings" in str(e):
+                print("  Cause: max_length exceeds model's maximum position embeddings")
+            elif "pooler_output" in str(e):
+                print("  Cause: Model variant doesn't have pooler_output")
 
-        return res["primary"]
+            if _HAS_MLFLOW:
+                mlflow.log_param("error", error_msg[:250])  # Truncate long errors
+                mlflow.log_metric("final_primary", 0.0)  # Worst possible score
+                mlflow.end_run()
+
+            # Return worst possible score to let Optuna skip this configuration
+            raise optuna.exceptions.TrialPruned(
+                f"Invalid configuration: {error_msg}"
+            ) from e
+
+        except Exception as e:
+            # Unexpected errors - still log and prune
+            import traceback
+
+            print(f"\n[CRITICAL ERROR] Trial {trial.number} failed unexpectedly:")
+            traceback.print_exc()
+
+            if _HAS_MLFLOW:
+                mlflow.log_param("fatal_error", str(e)[:250])
+                mlflow.end_run()
+
+            raise optuna.exceptions.TrialPruned(
+                f"Unexpected error: {type(e).__name__}"
+            ) from e
 
     return _obj
 
@@ -653,10 +836,13 @@ def main():
     parser.add_argument("--multi-objective", action="store_true")
     args = parser.parse_args()
 
-    os.makedirs(
-        os.path.dirname(args.storage.replace("sqlite:///", "")),
-        exist_ok=True,
-    )
+    # Create storage directory only for SQLite (not PostgreSQL)
+    if args.storage.startswith("sqlite://"):
+        os.makedirs(
+            os.path.dirname(args.storage.replace("sqlite:///", "")),
+            exist_ok=True,
+        )
+
     os.makedirs(args.outdir, exist_ok=True)
     default_mlflow_setup(args.outdir)
 
