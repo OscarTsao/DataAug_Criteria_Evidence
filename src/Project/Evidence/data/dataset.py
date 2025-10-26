@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch.utils.data import Dataset
@@ -58,7 +58,10 @@ def _token_span_from_char(
 
 
 class EvidenceDataset(Dataset):
-    """Dataset for span extraction on RED-SM5 evidence annotations."""
+    """Dataset for span extraction on RED-SM5 evidence annotations.
+
+    Supports optional data augmentation during training via augmentation_pipeline.
+    """
 
     def __init__(
         self,
@@ -70,6 +73,8 @@ class EvidenceDataset(Dataset):
         max_length: int = 512,
         padding: str = "max_length",
         truncation: bool = True,
+        augmentation_pipeline: Any | None = None,
+        is_training: bool = False,
     ) -> None:
         super().__init__()
         self.csv_path = Path(csv_path or DEFAULT_DATASET_PATH)
@@ -106,6 +111,10 @@ class EvidenceDataset(Dataset):
 
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(tokenizer_name)
 
+        # Augmentation support
+        self.augmentation_pipeline = augmentation_pipeline
+        self.is_training = is_training
+
     def __len__(self) -> int:
         return len(self.examples)
 
@@ -114,6 +123,11 @@ class EvidenceDataset(Dataset):
 
         context = example[self.context_column]
         answer = example[self.answer_column]
+
+        # Apply augmentation if enabled and in training mode
+        # Note: For QA tasks, we augment the context but keep answer alignment
+        if self.augmentation_pipeline and self.is_training:
+            context = self.augmentation_pipeline.augment(context)
 
         start_char, end_char = _find_answer_span(context, answer)
 

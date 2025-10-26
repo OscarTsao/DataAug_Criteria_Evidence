@@ -12,6 +12,7 @@
 
 import argparse
 import json
+import logging
 import os
 import random
 import time
@@ -29,6 +30,21 @@ try:
     _HAS_MLFLOW = True
 except Exception:
     _HAS_MLFLOW = False
+
+# Augmentation imports
+try:
+    import sys
+    from pathlib import Path
+
+    # Add src to path for augmentation imports
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from psy_agents_noaug.augmentation.config_utils import hpo_config_to_aug_config
+    from psy_agents_noaug.augmentation.pipeline import AugmenterPipeline
+
+    _HAS_AUG = True
+except Exception as e:
+    logging.warning(f"Augmentation imports failed: {e}")
+    _HAS_AUG = False
 
 
 def set_seeds(seed: int):
@@ -519,36 +535,79 @@ def run_training_eval(
     project_root = Path(__file__).parent.parent
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+    # Create augmentation pipeline if enabled
+    aug_pipeline = None
+    if _HAS_AUG:
+        aug_config = hpo_config_to_aug_config(cfg, global_seed=cfg["meta"]["seed"])
+        if aug_config:
+            try:
+                aug_pipeline = AugmenterPipeline(aug_config)
+                print(f"[AUG] Created pipeline: lib={aug_config.lib}, methods={aug_config.methods}")
+            except Exception as e:
+                print(f"[AUG] Failed to create pipeline: {e}")
+                aug_pipeline = None
+
     if task in ("criteria", "share", "joint"):
         dataset_path = project_root / "data" / "redsm5" / "redsm5_annotations.csv"
-        dataset = CriteriaDataset(
+        # Create separate datasets for train (with aug) and val/test (without aug)
+        train_dataset_full = CriteriaDataset(
             csv_path=dataset_path,
             tokenizer=tokenizer,
             max_length=cfg["tok"]["max_length"],
+            augmentation_pipeline=aug_pipeline,
+            is_training=True,
+        )
+        val_dataset_full = CriteriaDataset(
+            csv_path=dataset_path,
+            tokenizer=tokenizer,
+            max_length=cfg["tok"]["max_length"],
+            augmentation_pipeline=None,
+            is_training=False,
         )
         num_labels = 2
     elif task == "evidence":
         dataset_path = (
             project_root / "data" / "processed" / "redsm5_matched_evidence.csv"
         )
-        dataset = EvidenceDataset(
+        # Create separate datasets for train (with aug) and val/test (without aug)
+        train_dataset_full = EvidenceDataset(
             csv_path=dataset_path,
             tokenizer=tokenizer,
             max_length=cfg["tok"]["max_length"],
+            augmentation_pipeline=aug_pipeline,
+            is_training=True,
+        )
+        val_dataset_full = EvidenceDataset(
+            csv_path=dataset_path,
+            tokenizer=tokenizer,
+            max_length=cfg["tok"]["max_length"],
+            augmentation_pipeline=None,
+            is_training=False,
         )
         num_labels = 2
     else:
         raise ValueError(f"Unknown task: {task}")
 
     # Split dataset (80/10/10) - train/val/test
-    train_size = int(0.8 * len(dataset))
-    val_size = int(0.1 * len(dataset))
-    test_size = len(dataset) - train_size - val_size
+    # Use same indices for both train_dataset_full and val_dataset_full to ensure consistency
+    total_size = len(train_dataset_full)
+    train_size = int(0.8 * total_size)
+    val_size = int(0.1 * total_size)
+    test_size = total_size - train_size - val_size
 
+    # Generate indices with fixed seed
     generator = torch.Generator().manual_seed(cfg["meta"]["seed"])
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset, [train_size, val_size, test_size], generator=generator
-    )
+    indices = torch.randperm(total_size, generator=generator).tolist()
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size : train_size + val_size]
+    test_indices = indices[train_size + val_size :]
+
+    # Create subsets: train uses augmentation, val/test don't
+    from torch.utils.data import Subset
+
+    train_dataset = Subset(train_dataset_full, train_indices)
+    val_dataset = Subset(val_dataset_full, val_indices)
+    test_dataset = Subset(val_dataset_full, test_indices)
 
     # Create dataloaders with optimized workers
     # Use environment variable or auto-detect based on CPU cores

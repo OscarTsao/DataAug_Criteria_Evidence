@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch.utils.data import Dataset
@@ -17,7 +17,10 @@ DEFAULT_DATASET_PATH = (
 
 
 class CriteriaDataset(Dataset):
-    """Dataset reading RED-SM5 sentence annotations for binary criteria classification."""
+    """Dataset reading RED-SM5 sentence annotations for binary criteria classification.
+
+    Supports optional data augmentation during training via augmentation_pipeline.
+    """
 
     def __init__(
         self,
@@ -29,6 +32,8 @@ class CriteriaDataset(Dataset):
         max_length: int = 256,
         padding: str = "max_length",
         truncation: bool = True,
+        augmentation_pipeline: Any | None = None,
+        is_training: bool = False,
     ) -> None:
         super().__init__()
         self.csv_path = Path(csv_path or DEFAULT_DATASET_PATH)
@@ -67,6 +72,10 @@ class CriteriaDataset(Dataset):
         # Users may provide a pre-configured tokenizer (e.g., shared between train/val).
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(tokenizer_name)
 
+        # Augmentation support
+        self.augmentation_pipeline = augmentation_pipeline
+        self.is_training = is_training
+
     def __len__(self) -> int:
         return len(self.examples)
 
@@ -74,6 +83,10 @@ class CriteriaDataset(Dataset):
         example = self.examples[index]
         text = example[self.text_column]
         label = int(example[self.label_column])
+
+        # Apply augmentation if enabled and in training mode
+        if self.augmentation_pipeline and self.is_training:
+            text = self.augmentation_pipeline.augment(text)
 
         encoded = self.tokenizer(
             text,
