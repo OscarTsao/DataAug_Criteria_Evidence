@@ -138,22 +138,23 @@ _HEAD_LIMITS = json.loads(os.environ.get("HPO_HEAD_LIMITS_JSON", "{}"))
 
 # Augmentation configuration
 AUG_LIBS = ["none", "nlpaug", "textattack", "both"]
+# Use full registry names (nlpaug/char/*, nlpaug/word/*, textattack/*)
 AUG_METHODS_NLPAUG = [
-    "KeyboardAug",
-    "OcrAug",
-    "RandomCharAug",
-    "RandomWordAug",
-    "SpellingAug",
-    "SplitAug",
-    "SynonymAug",
-    "TfIdfAug",
+    "nlpaug/char/KeyboardAug",
+    "nlpaug/char/OcrAug",
+    "nlpaug/char/RandomCharAug",
+    "nlpaug/word/RandomWordAug",
+    "nlpaug/word/SpellingAug",
+    "nlpaug/word/SplitAug",
+    "nlpaug/word/SynonymAug",
+    # "nlpaug/word/TfIdfAug",  # Requires pre-trained model, skip for now
 ]
 AUG_METHODS_TEXTATTACK = [
-    "DeletionAugmenter",
-    "SwapAugmenter",
-    "SynonymInsertionAugmenter",
-    "EasyDataAugmenter",
-    "CheckListAugmenter",
+    "textattack/DeletionAugmenter",
+    "textattack/SwapAugmenter",
+    "textattack/SynonymInsertionAugmenter",
+    "textattack/EasyDataAugmenter",
+    "textattack/CheckListAugmenter",
 ]
 
 
