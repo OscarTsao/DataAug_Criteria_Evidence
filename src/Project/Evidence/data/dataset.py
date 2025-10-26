@@ -124,10 +124,12 @@ class EvidenceDataset(Dataset):
         context = example[self.context_column]
         answer = example[self.answer_column]
 
-        # Apply augmentation if enabled and in training mode
-        # Note: For QA tasks, we augment the context but keep answer alignment
-        if self.augmentation_pipeline and self.is_training:
-            context = self.augmentation_pipeline.augment(context)
+        # NOTE: Augmentation disabled for Evidence/QA tasks
+        # Augmenting context breaks answer span alignment (character positions change)
+        # Future work: Implement span-aware augmentation that tracks position changes
+        # For now, augmentation pipeline is accepted but not applied
+        # if self.augmentation_pipeline and self.is_training:
+        #     context = self.augmentation_pipeline.augment(context)
 
         start_char, end_char = _find_answer_span(context, answer)
 
