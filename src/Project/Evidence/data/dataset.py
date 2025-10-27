@@ -42,18 +42,66 @@ def _token_span_from_char(
     start_char: int,
     end_char: int,
 ) -> tuple[int, int]:
+    """Find token span from character positions with robust fallback.
+
+    Args:
+        offsets: Token offset mapping from tokenizer
+        start_char: Character start position
+        end_char: Character end position
+
+    Returns:
+        Tuple of (start_token_idx, end_token_idx)
+
+    Raises:
+        ValueError: If span cannot be aligned even with fallbacks
+    """
     start_token = None
     end_token = None
+
+    # First pass: exact match
     for idx, (token_start, token_end) in enumerate(offsets.tolist()):
-        if token_start == token_end == 0:
+        if token_start == token_end == 0:  # Skip special tokens
             continue
         if start_token is None and token_start <= start_char < token_end:
             start_token = idx
         if token_start < end_char <= token_end:
             end_token = idx
             break
+
+    # Second pass: find closest tokens if exact match failed
     if start_token is None or end_token is None:
-        raise ValueError("Unable to align character span with token offsets.")
+        min_start_dist = float('inf')
+        min_end_dist = float('inf')
+
+        for idx, (token_start, token_end) in enumerate(offsets.tolist()):
+            if token_start == token_end == 0:
+                continue
+
+            # Find closest token to start_char
+            if start_token is None:
+                dist = min(abs(token_start - start_char), abs(token_end - start_char))
+                if dist < min_start_dist:
+                    min_start_dist = dist
+                    start_token = idx
+
+            # Find closest token to end_char
+            if end_token is None:
+                dist = min(abs(token_start - end_char), abs(token_end - end_char))
+                if dist < min_end_dist and idx >= (start_token or 0):
+                    min_end_dist = dist
+                    end_token = idx
+
+    # Validate we found something reasonable
+    if start_token is None or end_token is None:
+        raise ValueError(
+            f"Unable to align character span [{start_char}, {end_char}] "
+            f"with token offsets. start_token={start_token}, end_token={end_token}"
+        )
+
+    # Ensure end >= start
+    if end_token < start_token:
+        end_token = start_token
+
     return start_token, end_token
 
 

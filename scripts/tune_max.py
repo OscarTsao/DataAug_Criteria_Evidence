@@ -257,53 +257,41 @@ def suggest_augmentation(trial: optuna.Trial) -> dict[str, Any]:
     max_replace = trial.suggest_float("aug.max_replace_ratio", 0.1, 0.5)
 
     # Select methods based on library
+    # Use fixed categorical distributions (no dynamic choices) to avoid Optuna error
     methods = []
 
     if aug_lib in ("nlpaug", "both"):
-        n_nlpaug = trial.suggest_int(
-            "aug.n_nlpaug_methods", 1, min(3, len(AUG_METHODS_NLPAUG))
-        )
-        # Sample subset of nlpaug methods
-        selected_nlpaug = trial.suggest_categorical(
-            "aug.nlpaug_method_1",
-            AUG_METHODS_NLPAUG,
-        )
-        methods.append(selected_nlpaug)
+        # Always sample from same choices, dedupe later
+        method_1 = trial.suggest_categorical("aug.nlpaug_method_1", AUG_METHODS_NLPAUG)
+        method_2 = trial.suggest_categorical("aug.nlpaug_method_2", AUG_METHODS_NLPAUG)
+        method_3 = trial.suggest_categorical("aug.nlpaug_method_3", AUG_METHODS_NLPAUG)
 
-        if n_nlpaug >= 2:
-            remaining = [m for m in AUG_METHODS_NLPAUG if m != selected_nlpaug]
-            selected_nlpaug_2 = trial.suggest_categorical(
-                "aug.nlpaug_method_2",
-                remaining,
-            )
-            methods.append(selected_nlpaug_2)
+        # Number of methods to actually use
+        n_nlpaug = trial.suggest_int("aug.n_nlpaug_methods", 1, 3)
 
-        if n_nlpaug >= 3:
-            remaining = [m for m in AUG_METHODS_NLPAUG if m not in methods]
-            selected_nlpaug_3 = trial.suggest_categorical(
-                "aug.nlpaug_method_3",
-                remaining,
-            )
-            methods.append(selected_nlpaug_3)
+        # Collect and deduplicate
+        nlpaug_methods = [method_1]
+        if n_nlpaug >= 2 and method_2 not in nlpaug_methods:
+            nlpaug_methods.append(method_2)
+        if n_nlpaug >= 3 and method_3 not in nlpaug_methods:
+            nlpaug_methods.append(method_3)
+
+        methods.extend(nlpaug_methods)
 
     if aug_lib in ("textattack", "both"):
-        n_textattack = trial.suggest_int(
-            "aug.n_textattack_methods", 1, min(2, len(AUG_METHODS_TEXTATTACK))
-        )
-        # Sample subset of textattack methods
-        selected_ta = trial.suggest_categorical(
-            "aug.textattack_method_1",
-            AUG_METHODS_TEXTATTACK,
-        )
-        methods.append(selected_ta)
+        # Always sample from same choices, dedupe later
+        ta_method_1 = trial.suggest_categorical("aug.textattack_method_1", AUG_METHODS_TEXTATTACK)
+        ta_method_2 = trial.suggest_categorical("aug.textattack_method_2", AUG_METHODS_TEXTATTACK)
 
-        if n_textattack >= 2:
-            remaining = [m for m in AUG_METHODS_TEXTATTACK if m != selected_ta]
-            selected_ta_2 = trial.suggest_categorical(
-                "aug.textattack_method_2",
-                remaining,
-            )
-            methods.append(selected_ta_2)
+        # Number of methods to actually use
+        n_textattack = trial.suggest_int("aug.n_textattack_methods", 1, 2)
+
+        # Collect and deduplicate
+        ta_methods = [ta_method_1]
+        if n_textattack >= 2 and ta_method_2 not in ta_methods:
+            ta_methods.append(ta_method_2)
+
+        methods.extend(ta_methods)
 
     return {
         "augmentation": {
