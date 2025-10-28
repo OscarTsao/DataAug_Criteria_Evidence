@@ -1,5 +1,5 @@
 # Field mapping configuration with STRICT validation rules
-# 
+#
 # CRITICAL RULES (HIGHEST PRIORITY):
 # 1. status field -> ONLY for criteria labels
 # 2. cases field -> ONLY for evidence labels
@@ -18,7 +18,7 @@ annotations:
   criterion_id: "criterion_id"
   status: "status"  # ONLY for criteria task
   cases: "cases"    # ONLY for evidence task
-  
+
 # Status field value mapping (for criteria labels)
 status_values:
   positive: ["positive", "present", "true", "1", 1, True]
@@ -52,3 +52,7 @@ validation:
   fail_on_missing_post_id: true
   drop_duplicates: true
   warn_on_conflicts: true
+## Field mapping configuration
+#
+# Maps CSV/HF dataset column names to canonical names used by loaders and
+# STRICT groundtruth builders. Update this when your raw data schema changes.

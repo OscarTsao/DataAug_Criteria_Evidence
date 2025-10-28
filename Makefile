@@ -6,6 +6,7 @@
 .PHONY: tune-criteria-max tune-evidence-max tune-share-max tune-joint-max
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
+.PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
 
 # Default target
@@ -338,6 +339,29 @@ train-with-json-logs:
 	LOG_JSON=true poetry run python -m psy_agents_noaug.cli train
 
 #==============================================================================
+# Retrain Best Evidence (from Optuna DB)
+#==============================================================================
+
+## retrain-evidence-aug: Retrain best evidence trial and save config/checkpoint/metrics
+retrain-evidence-aug:
+	@echo "$(BLUE)Retraining best Evidence model (with augmentation settings)...$(NC)"
+	RETRAIN_EPOCHS=$${RETRAIN_EPOCHS:-6} NUM_WORKERS=$${NUM_WORKERS:-8} \
+	poetry run python scripts/retrain_best_evidence.py \
+		--study $${EVIDENCE_STUDY:-aug-evidence-production-2025-10-27} \
+		--storage $${OPTUNA_STORAGE:-sqlite:///_optuna/dataaug.db} \
+		--outdir outputs/retrain/evidence_aug
+
+## retrain-evidence-noaug: Retrain best evidence trial with augmentation disabled
+retrain-evidence-noaug:
+	@echo "$(BLUE)Retraining best Evidence model (augmentation disabled)...$(NC)"
+	RETRAIN_EPOCHS=$${RETRAIN_EPOCHS:-6} NUM_WORKERS=$${NUM_WORKERS:-8} \
+	poetry run python scripts/retrain_best_evidence.py \
+		--study $${EVIDENCE_STUDY:-aug-evidence-production-2025-10-27} \
+		--storage $${OPTUNA_STORAGE:-sqlite:///_optuna/dataaug.db} \
+		--outdir outputs/retrain/evidence_noaug \
+		--disable-augmentation
+
+#==============================================================================
 # Cleaning
 #==============================================================================
 
@@ -419,19 +443,23 @@ info:
 	@test -d mlruns && echo "  MLflow: ✓ Runs directory exists" || echo "  MLflow: ✗ No runs yet"
 
 tune-criteria-max:
-	@HPO_EPOCHS?=6; \
+	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
 	python scripts/tune_max.py --agent criteria --study noaug-criteria-max --n-trials 800 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
 
 tune-evidence-max:
-	@HPO_EPOCHS?=6; \
+	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
 	python scripts/tune_max.py --agent evidence --study noaug-evidence-max --n-trials 1200 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
 
 tune-share-max:
-	@HPO_EPOCHS?=6; \
+	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
 	python scripts/tune_max.py --agent share --study noaug-share-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
 
 tune-joint-max:
-	@HPO_EPOCHS?=6; \
+	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
 	python scripts/tune_max.py --agent joint --study noaug-joint-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
 
 #==============================================================================
@@ -453,7 +481,7 @@ tune-criteria-supermax:
 	@echo "Trials: $(N_TRIALS_CRITERIA) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
 	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
 		--agent criteria --study noaug-criteria-supermax \
-		--n-trials $(N_TRIALS_CRITERIA) --parallel $(PAR) \
+		--n-trials $(N_TRIALS_CRITERIA) --parallel 1 \
 		--outdir $(HPO_OUTDIR)
 
 ## tune-evidence-supermax: Run super-max HPO for evidence (8000 trials, 100 epochs, ES patience=20)
@@ -462,7 +490,7 @@ tune-evidence-supermax:
 	@echo "Trials: $(N_TRIALS_EVIDENCE) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
 	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
 		--agent evidence --study noaug-evidence-supermax \
-		--n-trials $(N_TRIALS_EVIDENCE) --parallel $(PAR) \
+		--n-trials $(N_TRIALS_EVIDENCE) --parallel 1 \
 		--outdir $(HPO_OUTDIR)
 
 ## tune-share-supermax: Run super-max HPO for share (3000 trials, 100 epochs, ES patience=20)
@@ -471,7 +499,7 @@ tune-share-supermax:
 	@echo "Trials: $(N_TRIALS_SHARE) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
 	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
 		--agent share --study noaug-share-supermax \
-		--n-trials $(N_TRIALS_SHARE) --parallel $(PAR) \
+		--n-trials $(N_TRIALS_SHARE) --parallel 1 \
 		--outdir $(HPO_OUTDIR)
 
 ## tune-joint-supermax: Run super-max HPO for joint (3000 trials, 100 epochs, ES patience=20)
@@ -480,7 +508,7 @@ tune-joint-supermax:
 	@echo "Trials: $(N_TRIALS_JOINT) | Parallel: $(PAR) | Epochs: 100 | Patience: 20"
 	HPO_EPOCHS=100 HPO_PATIENCE=20 poetry run python scripts/tune_max.py \
 		--agent joint --study noaug-joint-supermax \
-		--n-trials $(N_TRIALS_JOINT) --parallel $(PAR) \
+		--n-trials $(N_TRIALS_JOINT) --parallel 1 \
 		--outdir $(HPO_OUTDIR)
 
 ## tune-all-supermax: Run super-max HPO for ALL architectures sequentially (criteria→evidence→share→joint)

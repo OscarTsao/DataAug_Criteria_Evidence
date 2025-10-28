@@ -1,4 +1,9 @@
-"""Logging utilities."""
+"""Logging utilities for consistent console/file output across modules.
+
+Prefer using ``get_logger(__name__)`` at module import time to avoid repeated
+handler registration. Handlers are reset per call to keep behaviour predictable
+in notebook/test environments.
+"""
 
 import logging
 import sys

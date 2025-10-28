@@ -1,4 +1,7 @@
 # Evidence extraction task configuration (sentence-level classification)
+#
+# Aligns with groundtruth produced by data/groundtruth.py:
+# - evidence spans and texts come from the 'cases' field only (STRICT rule)
 
 name: "evidence"
 type: "multi_label_classification"

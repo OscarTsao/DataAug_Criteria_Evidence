@@ -1,3 +1,9 @@
+"""Joint dataset that feeds dual encoders (criteria + evidence).
+
+Builds two tokenised views of each sample and aligns evidence spans to token
+offsets, returning both classification labels and start/end positions.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -68,7 +74,7 @@ def _token_span_from_char(
 
 
 class JointDataset(Dataset):
-    """Dataset providing inputs for joint criteria and evidence models."""
+    """Provide inputs for joint criteria and evidence models in one sample."""
 
     def __init__(
         self,

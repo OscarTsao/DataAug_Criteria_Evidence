@@ -16,3 +16,6 @@ test_ratio: 0.15
 # Optional overrides for caching and local mirroring
 hf_cache_dir: null  # e.g., "${env:HF_HOME,null}"
 data_dir: null      # Optional local override for HF cache fallback
+## Hugging Face dataset configuration (ReDSM-5)
+#
+# Controls dataset name/splits/cache for loading posts and annotations from HF.

@@ -15,3 +15,6 @@ test_ratio: 0.15
 # File names inside data_dir
 posts_file: "posts.csv"
 annotations_file: "annotations.csv"
+## Local CSV dataset configuration
+#
+# Configure paths and column names for loading posts and annotations from CSVs.

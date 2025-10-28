@@ -1,3 +1,9 @@
+"""Training engine for the Joint architecture (criteria + evidence).
+
+Handles dual tokenizers/encoders and coordinates training with simple metrics
+and optional MLflow logging. Designed to be HPO/test friendly.
+"""
+
 from __future__ import annotations
 
 import math

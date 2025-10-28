@@ -1,3 +1,9 @@
+"""Evidence architecture model: encoder + span prediction head.
+
+Produces start/end logits for answer spans (evidence) with a configurable
+MLP stack on top of token hidden states.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -12,6 +18,8 @@ from psy_agents_noaug.architectures.utils import SpanPredictionHead, make_bool_s
 
 
 class Model(nn.Module):
+    """Pretrained encoder with configurable span head (layers/hidden/act/do)."""
+
     def __init__(
         self,
         model_name: str = "bert-base-uncased",

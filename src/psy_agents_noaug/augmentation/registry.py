@@ -1,8 +1,9 @@
-"""
-Registry of on-the-fly text augmenters.
+"""Registry of on‑the‑fly text augmenters.
 
-The registry exposes a uniform interface where each augmenter is wrapped in
-``AugmenterWrapper`` with a single ``augment_one`` method that returns a string.
+Unifies disparate augmentation libraries (nlpaug, TextAttack) behind a single
+wrapper interface. Each registered method builds an ``AugmenterWrapper`` that
+exposes ``augment_one(text) -> str``. If an underlying augmenter produces a
+list (common in TextAttack), the wrapper returns the first non‑empty string.
 """
 
 from __future__ import annotations
@@ -38,7 +39,11 @@ class AugmenterWrapper:
         self._returns_list = returns_list
 
     def augment_one(self, text: str) -> str:
-        """Apply augmentation safely, returning the original text on failure."""
+        """Apply augmentation safely, returning the original text on failure.
+
+        Defensive behaviour ensures the training loop never breaks due to
+        augmentation errors or corner cases – empty lists, None returns, etc.
+        """
         try:
             result = self._augmenter.augment(text)
         except Exception as exc:  # pragma: no cover - defensive path
@@ -66,7 +71,10 @@ class AugmenterWrapper:
 
 
 def _load_reserved_tokens(reserved_map_path: str | Path) -> dict[str, str] | list[str]:
-    """Load reserved tokens for ReservedAug."""
+    """Load reserved tokens for ReservedAug.
+
+    The JSON can be a mapping (e.g., canonical forms) or a list of tokens.
+    """
     data_path = Path(reserved_map_path)
     if not data_path.exists():
         raise FileNotFoundError(f"Reserved map not found: {data_path}")
@@ -95,6 +103,8 @@ class RegistryEntry:
 def _wrap(
     factory: Callable[..., Any], *, returns_list: bool = False, name: str | None = None
 ) -> AugmenterFactory:
+    """Wrap a concrete augmenter factory into an ``AugmenterWrapper`` builder."""
+
     def _builder(**kwargs: Any) -> AugmenterWrapper:
         augmenter = factory(**kwargs)
         augmenter_name = name or getattr(factory, "__name__", "augmenter")
@@ -106,6 +116,7 @@ def _wrap(
 def _make_reserved(
     reserved_map_path: str | Path | None, **kwargs: Any
 ) -> AugmenterWrapper:
+    """Factory for ``naw.ReservedAug`` that validates required resources."""
     if reserved_map_path is None:
         raise ValueError("reserved_map_path is required for ReservedAug")
     reserved_tokens = _load_reserved_tokens(reserved_map_path)
@@ -114,6 +125,7 @@ def _make_reserved(
 
 
 def _make_tfidf(model_path: str | Path | None, **kwargs: Any) -> AugmenterWrapper:
+    """Factory for ``naw.TfIdfAug`` that validates required resources."""
     if model_path is None:
         raise ValueError("model_path is required for TfIdfAug")
     augmenter = naw.TfIdfAug(model_path=str(model_path), **kwargs)

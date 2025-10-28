@@ -39,3 +39,6 @@ search_space:
   dataset.max_length:
     distribution: categorical
     choices: [384, 448, 512]
+## HPO settings for Evidence task
+#
+# Defines Optuna settings and search spaces leveraged by HPO runners.

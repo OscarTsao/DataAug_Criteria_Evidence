@@ -88,12 +88,13 @@ class ReDSM5DataLoader:
             DataFrame with posts
         """
         if self.data_source == "local":
+            # Expect CSVs under ``data_dir`` matching field_map columns
             posts_path = self.data_dir / self.posts_file
             if not posts_path.exists():
                 raise FileNotFoundError(f"Posts file not found: {posts_path}")
             df = pd.read_csv(posts_path)
         else:
-            # Load from HuggingFace
+            # Load from HuggingFace dataset card/splits
             from datasets import load_dataset
 
             dataset_kwargs = {}
@@ -125,7 +126,7 @@ class ReDSM5DataLoader:
                 raise FileNotFoundError(f"Annotations file not found: {annot_path}")
             df = pd.read_csv(annot_path)
         else:
-            # Load from HuggingFace
+            # Load from HuggingFace dataset card/splits
             from datasets import load_dataset
 
             dataset_kwargs = {}

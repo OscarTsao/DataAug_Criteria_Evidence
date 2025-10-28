@@ -1,4 +1,9 @@
-"""Enhanced MLflow utilities for experiment tracking."""
+"""Enhanced MLflow utilities for experiment tracking.
+
+These helpers centralise MLflow configuration and robust logging with
+defensive fallbacks so training loops remain resilient when the tracking
+backend is unreachable or users run locally without a server.
+"""
 
 import contextlib
 import hashlib

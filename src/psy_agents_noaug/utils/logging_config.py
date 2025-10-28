@@ -1,7 +1,7 @@
-"""
-Centralized structured logging configuration.
+"""Centralised structured logging configuration.
 
-Provides JSON-structured logging for production observability.
+Provides JSON-structured logging for production observability and an easy
+switch to plain text via the ``LOG_JSON`` environment variable.
 """
 
 import json

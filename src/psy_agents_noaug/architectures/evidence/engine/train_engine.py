@@ -1,3 +1,9 @@
+"""Training engine for the Evidence architecture (sentence/QA-like).
+
+Builds datasets from CSVs and trains a span/evidence classifier with basic
+metrics and MLflow logging hooks. Designed to be dependency-light and HPO‑friendly.
+"""
+
 from __future__ import annotations
 
 import math
@@ -31,6 +37,7 @@ from psy_agents_noaug.architectures.evidence.utils import (
 
 
 def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
+    """Flatten nested config structures into ``dot.separated`` keys."""
     if isinstance(value, dict):
         for key, val in value.items():
             _flatten_dict(f"{prefix}.{key}" if prefix else key, val, accumulator)
@@ -45,6 +52,7 @@ def _prepare_datasets(
     tokenizer: AutoTokenizer,
     seed: int,
 ) -> tuple[Dataset, Dataset, Dataset | None]:
+    """Load CSV dataset and split into train/val/(optional) test subsets."""
     dataset_cfg = config.get("dataset", {})
     splits = dataset_cfg.get("splits", [0.8, 0.1, 0.1])
     if isinstance(splits, dict):
@@ -91,6 +99,7 @@ def _create_dataloaders(
     test_dataset: Dataset | None,
     config: dict[str, Any],
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Construct DataLoaders with sensible batch sizes and workers."""
     dataset_cfg = config.get("dataset", {})
     training_cfg = config.get("training", {})
 
@@ -124,6 +133,7 @@ def _create_dataloaders(
 
 
 def _build_model(config: dict[str, Any]) -> Model:
+    """Instantiate evidence model with configured encoder and dropout."""
     model_cfg = config.get("model", {})
     return Model(
         model_name=model_cfg.get("pretrained_model", "bert-base-uncased"),
@@ -132,6 +142,7 @@ def _build_model(config: dict[str, Any]) -> Model:
 
 
 def _select_device(config: dict[str, Any]) -> torch.device:
+    """Choose device in priority order: explicit > CUDA > MPS > CPU."""
     preferred = config.get("training", {}).get("device")
     if preferred:
         return torch.device(preferred)
@@ -145,6 +156,7 @@ def _select_device(config: dict[str, Any]) -> torch.device:
 def _create_optimizer(
     model: nn.Module, config: dict[str, Any]
 ) -> torch.optim.Optimizer:
+    """Create optimizer with weight‑decay/no‑decay parameter groups."""
     training_cfg = config.get("training", {})
     optimizer_cfg = training_cfg.get("optimizer", {}) or {}
     optimizer_name = optimizer_cfg.get("name", "adamw").lower()

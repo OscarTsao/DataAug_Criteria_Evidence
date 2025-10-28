@@ -53,11 +53,16 @@ class AugResources:
 
 
 def _clamp(value: float, low: float, high: float) -> float:
+    """Clamp numeric value to ``[low, high]`` inclusive."""
     return max(low, min(high, value))
 
 
 def _resolve_methods(lib: AugLib, methods: Sequence[str]) -> list[str]:
-    """Resolve effective augmentation methods given library selection."""
+    """Resolve effective augmentation methods given the selected libraries.
+
+    Supports the special value ``"all"`` which expands to all methods available
+    under the chosen library group.
+    """
     if lib == "none":
         return []
 
@@ -96,7 +101,11 @@ def _resolve_methods(lib: AugLib, methods: Sequence[str]) -> list[str]:
 
 
 def _ratio_kwargs(name: str, ratio: float) -> dict[str, Any]:
-    """Default intensity controls per method."""
+    """Return default intensity controls per method.
+
+    Different backends expose different parameter names; this helper maps a
+    unified ``max_replace_ratio`` to the appropriate argument.
+    """
     ratio = _clamp(ratio, 0.0, 1.0)
     if name.startswith("nlpaug/char/"):
         return {"aug_char_p": ratio}
@@ -119,6 +128,7 @@ def _ratio_kwargs(name: str, ratio: float) -> dict[str, Any]:
 def _merge_kwargs(
     base: dict[str, Any], override: dict[str, Any] | None
 ) -> dict[str, Any]:
+    """Shallow-merge dictionaries with ``override`` taking precedence."""
     merged = dict(base)
     if override:
         merged.update(override)
@@ -130,6 +140,7 @@ def _builder_kwargs(
     cfg: AugConfig,
     resources: AugResources | None,
 ) -> dict[str, Any]:
+    # Combine global “ratio” intensity with any per-method overrides
     overrides = cfg.method_kwargs.get(name, {})
     ratio_kwargs = _ratio_kwargs(name, cfg.max_replace_ratio)
     kwargs = _merge_kwargs(ratio_kwargs, overrides)
@@ -182,7 +193,7 @@ class AugmenterPipeline:
         self.ops_per_sample = max(1, min(2, int(cfg.ops_per_sample)))
         self.max_replace_ratio = _clamp(cfg.max_replace_ratio, 0.0, 1.0)
         # Global RNG not thread-safe; use instance RNG and re-seed in workers
-        self._rng = random.Random(cfg.seed)  # Instance-specific RNG
+        self._rng = random.Random(cfg.seed)  # Instance-specific RNG (thread-safe)
 
         self._augmenters: list[tuple[str, AugmenterWrapper]] = []
         for name in self.methods:
@@ -233,7 +244,12 @@ class AugmenterPipeline:
         self._rng.seed(seed)
 
     def __call__(self, text: str) -> str:
-        """Apply augmentation and record statistics."""
+        """Apply augmentation and record usage statistics.
+
+        The pipeline may sample several operations per sample. If no operation
+        changes the text (e.g., due to edge cases), we count it as skipped to
+        keep analytics meaningful.
+        """
         self.total_count += 1
         if not self._augmenters or self.p_apply <= 0.0:
             self.skipped_count += 1

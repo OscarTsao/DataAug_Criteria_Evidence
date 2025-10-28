@@ -1,3 +1,9 @@
+"""Evidence dataset for span extraction over RED-SM5 annotations.
+
+Builds paired inputs (context + criterion text) and aligns character-level
+evidence spans to token-level start/end positions using tokenizer offsets.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -71,7 +77,7 @@ def _token_span_from_char(
 
 
 class EvidenceDataset(Dataset):
-    """Dataset for span extraction on RED-SM5 evidence annotations."""
+    """Span extraction dataset mapping context+criterion to start/end tokens."""
 
     def __init__(
         self,
@@ -172,6 +178,7 @@ class EvidenceDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        """Return a tokenised sample with start/end positions for the answer."""
         example = self.examples[index]
 
         context = example[self.context_column]
@@ -212,6 +219,7 @@ def load_evidence_dataset(
     splits: Sequence[float] | None = None,
     **dataset_kwargs,
 ) -> EvidenceDataset | tuple[Dataset, ...]:
+    """Load a single dataset or split into subsets according to ``splits``."""
     dataset: EvidenceDataset = EvidenceDataset(**dataset_kwargs)
     if not splits:
         return dataset

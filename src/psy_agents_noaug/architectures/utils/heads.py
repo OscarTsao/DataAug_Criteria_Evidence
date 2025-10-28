@@ -1,3 +1,9 @@
+"""Shared building blocks for architectures: pooling and heads.
+
+Includes a small activation resolver, sequence pooling strategies, and simple
+classification/span heads used by criteria/evidence/joint/share variants.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -10,6 +16,7 @@ ActivationLike = Union[str, nn.Module]
 
 
 def _activation(name: ActivationLike) -> nn.Module:
+    """Return an activation module from a string or pass through a module."""
     if isinstance(name, nn.Module):
         return name
     key = (name or "gelu").lower()
@@ -28,6 +35,7 @@ def _as_hidden_dims(
     *,
     fallback: int,
 ) -> list[int]:
+    """Normalise hidden dims for a multi-layer head configuration."""
     if layers <= 1:
         return []
     if hidden is None:
@@ -42,6 +50,8 @@ def _as_hidden_dims(
 
 
 class SequencePooler(nn.Module):
+    """CLS/mean/max/attn pooling over token hidden states."""
+
     def __init__(self, hidden_size: int, pooling: str = "cls") -> None:
         super().__init__()
         pooling = pooling.lower()
@@ -99,6 +109,8 @@ class SequencePooler(nn.Module):
 
 
 class ClassificationHead(nn.Module):
+    """Configurable MLP classification head (layers/hidden/activation/dropout)."""
+
     def __init__(
         self,
         input_dim: int,
@@ -130,6 +142,8 @@ class ClassificationHead(nn.Module):
 
 
 class SpanPredictionHead(nn.Module):
+    """Lightweight span head that projects sequence states to start/end logits."""
+
     def __init__(
         self,
         input_dim: int,

@@ -64,6 +64,7 @@ class Evaluator:
         Returns:
             Dictionary with evaluation metrics
         """
+        # Switch to eval mode to disable dropout/batchnorm noise
         self.model.eval()
 
         all_predictions = []
@@ -111,7 +112,8 @@ class Evaluator:
             np.array(all_probabilities) if all_probabilities else np.empty((0, 0))
         )
 
-        # Compute metrics based on task type
+        # Compute metrics based on task type. The criteria/evidence branches
+        # include task‑specific extras (e.g., per‑criterion F1, evidence match).
         if self.task_type == "criteria":
             metrics = self._compute_criteria_metrics(
                 labels, predictions, probabilities, class_names, all_criterion_ids
@@ -125,7 +127,7 @@ class Evaluator:
                 labels, predictions, probabilities, class_names, all_criterion_ids
             )
 
-        # Add loss if available
+        # Add average loss if a criterion was provided
         if self.criterion:
             metrics["loss"] = total_loss / max(len(data_loader), 1)
 

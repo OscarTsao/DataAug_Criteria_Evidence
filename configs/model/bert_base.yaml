@@ -10,3 +10,6 @@ lora:
   r: 8
   alpha: 16
   dropout: 0.1
+## BERT-base configuration
+#
+# HF model identifier and basic encoder-level options for BERT.

@@ -99,3 +99,4 @@ __all__ = [
     "load_training_state",
     "training_state_exists",
 ]
+"""Checkpoint helpers tailored for Evidence engine training/eval."""

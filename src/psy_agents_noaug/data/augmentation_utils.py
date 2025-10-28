@@ -1,4 +1,9 @@
-"""Utilities for constructing augmentation pipelines for evidence task."""
+"""Utilities for constructing augmentation pipelines for the evidence task.
+
+This module keeps augmentation concerns isolated from dataset construction. It
+decides which methods are active, prepares any external resources (e.g. TF‑IDF
+models), and returns a frozen bundle the loader can use safely.
+"""
 
 from __future__ import annotations
 
@@ -34,6 +39,7 @@ class AugmentationArtifacts:
 
 
 def _ensure_sequence(methods: Sequence[str] | str | None) -> list[str]:
+    """Normalise a possibly scalar methods arg into a list of strings."""
     if methods is None:
         return []
     if isinstance(methods, str):
@@ -42,7 +48,11 @@ def _ensure_sequence(methods: Sequence[str] | str | None) -> list[str]:
 
 
 def resolve_methods(lib: str, methods: Sequence[str] | str | None) -> list[str]:
-    """Resolve declared methods to concrete augmenter identifiers."""
+    """Resolve declared methods to concrete augmenter identifiers.
+
+    Supports the special value ``"all"`` which expands to all methods available
+    within the selected library family. Ensures stable ordering and de‑dupes.
+    """
     if lib == "none":
         return []
 
@@ -81,7 +91,10 @@ def build_evidence_augmenter(
     *,
     tfidf_dir: str | Path = "_artifacts/tfidf/evidence",
 ) -> AugmentationArtifacts | None:
-    """Instantiate augmentation pipeline for evidence task if enabled."""
+    """Instantiate augmentation pipeline for evidence task if enabled.
+
+    Side effects: may fit/load a TF‑IDF vectoriser when requested.
+    """
     if not is_enabled(cfg):
         return None
 
@@ -108,6 +121,7 @@ def build_evidence_augmenter(
         resources.tfidf_model_path = str(tfidf_resource.path)
         cfg_copy.tfidf_model_path = str(tfidf_resource.path)
 
+    # Build the pipeline and seed its internal RNG for reproducibility
     pipeline = AugmenterPipeline(cfg_copy, resources=resources)
     pipeline.set_seed(cfg_copy.seed)
 

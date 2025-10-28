@@ -1,3 +1,9 @@
+"""Criteria architecture model: encoder + configurable classification head.
+
+Supports HPO-driven head configuration via ``head_cfg`` (layers/hidden/act/
+dropout/pooling) and task-level overrides via ``task_cfg`` (num_labels, etc.).
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -12,6 +18,8 @@ from psy_agents_noaug.architectures.utils import ClassificationHead, SequencePoo
 
 
 class Model(nn.Module):
+    """Pretrained transformer encoder with flexible pooling + MLP head."""
+
     def __init__(
         self,
         model_name: str = "bert-base-uncased",

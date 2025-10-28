@@ -1,3 +1,10 @@
+"""Joint architecture model (dual encoders with fusion to evidence head).
+
+Keeps interface parity with other architecture models via ``head_cfg`` and
+``task_cfg`` for HPO. Returns logits under a consistent key when returning
+dict-like outputs.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

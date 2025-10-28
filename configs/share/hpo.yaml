@@ -57,3 +57,6 @@ search_space:
     distribution: uniform
     low: 0.5
     high: 2.0
+## HPO settings for Share architecture
+#
+# Stage definitions/search spaces for shared-encoder dual-head models.

@@ -258,7 +258,7 @@ def create_evidence_groundtruth(
     # Parse cases field and explode
     df["cases_parsed"] = df["cases"].apply(parse_cases_field)
 
-    # Explode cases list
+    # Explode per‑annotation cases into distinct rows (one row per span)
     df = df.explode("cases_parsed", ignore_index=True)
 
     # Drop rows with no cases
@@ -295,7 +295,7 @@ def create_evidence_groundtruth(
         )
     )
 
-    # Add case_id (index within each post-criterion pair)
+    # Add case_id (0..N-1) within each (post_id, criterion_id) to track spans
     df["case_id"] = df.groupby(["post_id", "criterion_id"]).cumcount()
 
     # Validate criterion IDs

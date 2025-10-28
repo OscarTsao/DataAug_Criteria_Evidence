@@ -1,4 +1,10 @@
-"""Transformer encoder models for text encoding."""
+"""Transformer encoder wrappers for text representation.
+
+These thin wrappers centralise a few cross‑model choices:
+  - pooling strategy (``cls`` vs. ``mean``)
+  - optional gradient checkpointing (memory vs. speed trade‑off)
+  - optional LoRA adapters (via ``peft``) for parameter‑efficient finetuning
+"""
 
 from typing import Any
 
@@ -48,7 +54,7 @@ class TransformerEncoder(nn.Module):
         self.pooling_strategy = pooling_strategy
         self.max_length = max_length
 
-        # Load tokenizer and model
+        # Load tokenizer and model from HuggingFace hub/local cache
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         self.encoder = AutoModel.from_pretrained(model_name)
 
@@ -141,7 +147,7 @@ class TransformerEncoder(nn.Module):
         Returns:
             Encoded representations [batch_size, hidden_size]
         """
-        # Tokenize
+        # Tokenize a list of strings; batch encode for efficiency
         encoded = self.tokenizer(
             texts,
             padding=True,

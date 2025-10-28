@@ -90,3 +90,6 @@ hpo:
     type: "TPESampler"
     n_startup_trials: 10
     multivariate: true
+## HPO Stage A — Baseline sweep
+#
+# Establish a baseline over core hyperparameters before enabling augmentation.

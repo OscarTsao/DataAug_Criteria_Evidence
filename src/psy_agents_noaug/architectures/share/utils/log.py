@@ -27,3 +27,6 @@ def get_logger(
 
     logger.propagate = False
     return logger
+
+
+"""Logger helpers for Share architecture flows."""

@@ -1,3 +1,9 @@
+"""Shared encoder dataset producing both classification and span labels.
+
+Pairs context and criterion text, derives token spans for evidence, and
+returns a classification label for criteria in a single sample.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -68,7 +74,7 @@ def _token_span_from_char(
 
 
 class ShareDataset(Dataset):
-    """Dataset for multi-task learning with shared encoder (classification + span)."""
+    """Multi-task dataset for shared encoder (classification + span)."""
 
     def __init__(
         self,
@@ -171,6 +177,7 @@ class ShareDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        """Return tokenised inputs with labels and start/end positions."""
         example = self.examples[index]
 
         context = example[self.context_column]
@@ -213,6 +220,7 @@ def load_share_dataset(
     splits: Sequence[float] | None = None,
     **dataset_kwargs,
 ) -> ShareDataset | tuple[Dataset, ...]:
+    """Load a single dataset or split into subsets according to ``splits``."""
     dataset: ShareDataset = ShareDataset(**dataset_kwargs)
     if not splits:
         return dataset

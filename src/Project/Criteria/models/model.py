@@ -1,3 +1,10 @@
+"""Reference Criteria model used by maximal HPO flows.
+
+Lightweight wrapper around a HF encoder with a configurable FFN classification
+head. Accepts ``head_cfg``/``task_cfg`` for interface parity with other
+architectures in the Project tree.
+"""
+
 from collections.abc import Sequence
 from typing import Any
 
@@ -117,7 +124,10 @@ class Model(torch.nn.Module):
             token_type_ids=token_type_ids,
             return_dict=True,
         )
-        pooled_output = outputs.pooler_output
-        if pooled_output is None:
+        # Handle models without pooler_output (e.g., DistilBERT, some RoBERTa variants)
+        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            pooled_output = outputs.pooler_output
+        else:
+            # Fallback to CLS token from last_hidden_state
             pooled_output = outputs.last_hidden_state[:, 0, :]
         return self.classifier(pooled_output)

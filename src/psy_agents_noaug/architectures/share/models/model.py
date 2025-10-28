@@ -1,3 +1,9 @@
+"""Share architecture model (shared encoder with dual heads).
+
+Supports a single encoder with separate heads and returns logits consistently
+for downstream consumers and HPO logging.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

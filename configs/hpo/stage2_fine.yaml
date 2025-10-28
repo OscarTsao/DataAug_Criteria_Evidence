@@ -19,30 +19,30 @@ search_space:
     type: "loguniform"
     low: 5.0e-6
     high: 1.0e-5
-  
+
   weight_decay:
     type: "loguniform"
     low: 5.0e-4
     high: 5.0e-2
-  
+
   warmup_ratio:
     type: "uniform"
     low: 0.05
     high: 0.15
-  
+
   dropout:
     type: "uniform"
     low: 0.05
     high: 0.20
-  
+
   batch_size:
     type: "categorical"
     choices: [16, 32]
-  
+
   max_length:
     type: "categorical"
     choices: [384, 512]
-  
+
   gradient_clip:
     type: "uniform"
     low: 0.5
@@ -64,3 +64,6 @@ pruner:
   min_resource: 2
   max_resource: 10
   reduction_factor: 3
+## HPO Stage 2 — Fine search
+#
+# Narrows around the best configs from stage 1 with more training steps/epochs.

@@ -52,3 +52,8 @@ hydra:
   sweep:
     dir: outputs/criteria/multirun
     subdir: ${hydra.job.num}
+## Training overrides for Criteria task
+#
+# Use with Hydra composition to tailor epochs, batch sizes and runtime knobs
+# for Criteria experiments. Pairs with configs/task/criteria.yaml and a model
+# config under configs/model/.

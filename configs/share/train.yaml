@@ -59,3 +59,7 @@ hydra:
   sweep:
     dir: outputs/share/multirun
     subdir: ${hydra.job.num}
+## Training overrides for Share architecture
+#
+# Compose with model/task configs to adjust epochs, batch sizes and runtime
+# settings for training shared-encoder models with dual heads.

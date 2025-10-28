@@ -47,3 +47,4 @@ def load_study(study_name: str, storage: str | None = None) -> optuna.Study:
 
 
 __all__ = ["get_optuna_storage", "create_study", "load_study"]
+"""Optuna hooks/adapters for Criteria engine integration."""

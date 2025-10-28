@@ -1,3 +1,9 @@
+"""Training engine for the Share architecture (shared encoder, dual heads).
+
+This engine mirrors the structure of other engines to keep HPO/testing simple
+while handling the shared encoder setup and logging.
+"""
+
 from __future__ import annotations
 
 import math

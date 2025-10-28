@@ -1,6 +1,6 @@
 # Training defaults for NO-AUG pipeline
 
-num_epochs: 10
+num_epochs: 100
 batch_size: 16
 eval_batch_size: 32
 learning_rate: 2.0e-5
@@ -25,7 +25,7 @@ amp:
 early_stopping:
   metric: "val_f1_macro"
   mode: "max"
-  patience: 3
+  patience: 20
   min_delta: 0.0001
 
 logging_steps: 100

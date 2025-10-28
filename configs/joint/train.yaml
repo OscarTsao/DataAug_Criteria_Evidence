@@ -63,3 +63,7 @@ hydra:
   sweep:
     dir: outputs/joint/multirun
     subdir: ${hydra.job.num}
+## Training overrides for Joint architecture
+#
+# Compose with model/task configs to adjust epochs, batch sizes and runtime
+# settings for training joint criteria+evidence models.

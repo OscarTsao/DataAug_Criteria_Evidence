@@ -86,20 +86,33 @@ class EarlyStopping:
 
 
 def default_mlflow_setup(outdir: str):
+    """Setup MLflow with SQLite backend for unified tracking.
+
+    Uses the root mlflow.db for experiment tracking and model registry,
+    while Optuna uses _optuna/dataaug.db for HPO orchestration.
+    """
     if not _HAS_MLFLOW:
         return
     os.makedirs(outdir, exist_ok=True)
-    mlruns_dir = os.path.join(outdir, "mlruns")
-    mlflow.set_tracking_uri(f"file:{mlruns_dir}")
-    mlflow.set_experiment("NoAug_Criteria_Evidence")
+    # Use SQLite backend in project root for unified tracking
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
 
 def on_epoch(
     trial: optuna.Trial, step: int, metric: float, secondary: float | None = None
 ):
+    """Epoch callback that logs to both Optuna and MLflow."""
+    # Report to Optuna for pruning
     trial.report(metric, step=step)
     if secondary is not None:
         trial.set_user_attr(f"secondary_epoch_{step}", float(secondary))
+
+    # Log to MLflow if available and run is active
+    if _HAS_MLFLOW and mlflow.active_run():
+        mlflow.log_metric("val_metric", metric, step=step)
+        if secondary is not None:
+            mlflow.log_metric("val_loss", secondary, step=step)
+
     if trial.should_prune():
         raise optuna.TrialPruned(f"Pruned at step {step} with metric {metric:.4f}")
 
@@ -280,8 +293,12 @@ def suggest_augmentation(trial: optuna.Trial) -> dict[str, Any]:
 
     if aug_lib in ("textattack", "both"):
         # Always sample from same choices, dedupe later
-        ta_method_1 = trial.suggest_categorical("aug.textattack_method_1", AUG_METHODS_TEXTATTACK)
-        ta_method_2 = trial.suggest_categorical("aug.textattack_method_2", AUG_METHODS_TEXTATTACK)
+        ta_method_1 = trial.suggest_categorical(
+            "aug.textattack_method_1", AUG_METHODS_TEXTATTACK
+        )
+        ta_method_2 = trial.suggest_categorical(
+            "aug.textattack_method_2", AUG_METHODS_TEXTATTACK
+        )
 
         # Number of methods to actually use
         n_textattack = trial.suggest_int("aug.n_textattack_methods", 1, 2)
@@ -497,7 +514,7 @@ def run_training_eval(
 
     import torch
     from torch import nn
-    from torch.utils.data import DataLoader, random_split
+    from torch.utils.data import DataLoader
     from transformers import AutoTokenizer
 
     # Add src to path
@@ -506,6 +523,7 @@ def run_training_eval(
     from Project.Criteria.data.dataset import CriteriaDataset
     from Project.Criteria.models.model import Model as CriteriaModel
     from Project.Evidence.data.dataset import EvidenceDataset
+    from Project.Evidence.models.model import Model as EvidenceModel
 
     epochs = cfg["train"]["epochs"]
     batch_size = cfg["train"]["batch_size"]
@@ -531,7 +549,9 @@ def run_training_eval(
         if aug_config:
             try:
                 aug_pipeline = AugmenterPipeline(aug_config)
-                print(f"[AUG] Created pipeline: lib={aug_config.lib}, methods={aug_config.methods}")
+                print(
+                    f"[AUG] Created pipeline: lib={aug_config.lib}, methods={aug_config.methods}"
+                )
             except Exception as e:
                 print(f"[AUG] Failed to create pipeline: {e}")
                 aug_pipeline = None
@@ -625,15 +645,23 @@ def run_training_eval(
     )
 
     # Create model based on task
-    if task in ("criteria", "share", "joint") or task == "evidence":
-        # Use head_cfg for HPO compatibility
-        head_cfg = cfg.get("head", {})
+    head_cfg = cfg.get("head", {})
+    if task == "evidence":
+        # Evidence task: QA model with span prediction
+        model = EvidenceModel(
+            model_name=model_name,
+            head_cfg=head_cfg,
+        ).to(device)
+    elif task in ("criteria", "share", "joint"):
+        # Classification tasks: use Criteria model
         task_cfg = {"num_labels": num_labels}
         model = CriteriaModel(
             model_name=model_name,
             head_cfg=head_cfg,
             task_cfg=task_cfg,
         ).to(device)
+    else:
+        raise ValueError(f"Unknown task: {task}")
 
     criterion = nn.CrossEntropyLoss()
 
@@ -676,14 +704,28 @@ def run_training_eval(
         for batch in train_loader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
 
             optimizer.zero_grad()
 
             # Mixed precision forward pass
             with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
-                logits = model(input_ids, attention_mask)
-                loss = criterion(logits, labels)
+                if task == "evidence":
+                    # QA task: use start/end positions
+                    start_positions = batch["start_positions"].to(device)
+                    end_positions = batch["end_positions"].to(device)
+                    outputs = model(input_ids, attention_mask)
+                    # Model outputs (start_logits, end_logits) for QA
+                    start_logits = outputs[0]
+                    end_logits = outputs[1]
+                    # Compute QA loss (average of start and end losses)
+                    start_loss = criterion(start_logits, start_positions)
+                    end_loss = criterion(end_logits, end_positions)
+                    loss = (start_loss + end_loss) / 2.0
+                else:
+                    # Classification task: use labels
+                    labels = batch["labels"].to(device)
+                    logits = model(input_ids, attention_mask)
+                    loss = criterion(logits, labels)
 
             # Mixed precision backward pass
             if use_amp and scaler:
@@ -707,36 +749,87 @@ def run_training_eval(
 
         # Validation with mixed precision
         model.eval()
-        all_preds = []
-        all_labels = []
         val_loss = 0.0
 
-        with torch.no_grad():
-            for batch in val_loader:
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                labels = batch["labels"].to(device)
+        if task == "evidence":
+            # QA task: collect predictions for EM/F1
+            all_start_preds = []
+            all_end_preds = []
+            all_start_labels = []
+            all_end_labels = []
 
-                # Use AMP for inference too
-                with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
-                    logits = model(input_ids, attention_mask)
-                    loss = criterion(logits, labels)
+            with torch.no_grad():
+                for batch in val_loader:
+                    input_ids = batch["input_ids"].to(device)
+                    attention_mask = batch["attention_mask"].to(device)
+                    start_positions = batch["start_positions"].to(device)
+                    end_positions = batch["end_positions"].to(device)
 
-                val_loss += loss.item()
+                    # Use AMP for inference too
+                    with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
+                        outputs = model(input_ids, attention_mask)
+                        start_logits = outputs[0]
+                        end_logits = outputs[1]
+                        start_loss = criterion(start_logits, start_positions)
+                        end_loss = criterion(end_logits, end_positions)
+                        loss = (start_loss + end_loss) / 2.0
 
-                preds = logits.argmax(dim=1)
-                all_preds.extend(preds.cpu().tolist())
-                all_labels.extend(labels.cpu().tolist())
+                    val_loss += loss.item()
 
-        # Calculate metrics
-        from sklearn.metrics import f1_score
+                    start_preds = start_logits.argmax(dim=1)
+                    end_preds = end_logits.argmax(dim=1)
+                    all_start_preds.extend(start_preds.cpu().tolist())
+                    all_end_preds.extend(end_preds.cpu().tolist())
+                    all_start_labels.extend(start_positions.cpu().tolist())
+                    all_end_labels.extend(end_positions.cpu().tolist())
 
-        avg_val_loss = val_loss / len(val_loader)
-        val_f1 = f1_score(all_labels, all_preds, average="macro")
+            # Calculate QA metrics (simple exact match on positions)
+            exact_matches = sum(
+                1
+                for sp, ep, sl, el in zip(
+                    all_start_preds,
+                    all_end_preds,
+                    all_start_labels,
+                    all_end_labels,
+                    strict=False,
+                )
+                if sp == sl and ep == el
+            )
+            avg_val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0.0
+            metric = exact_matches / len(all_start_preds) if all_start_preds else 0.0
+            best = max(best, metric)
 
-        # Use F1 as primary metric
-        metric = val_f1
-        best = max(best, metric)
+        else:
+            # Classification task
+            all_preds = []
+            all_labels = []
+
+            with torch.no_grad():
+                for batch in val_loader:
+                    input_ids = batch["input_ids"].to(device)
+                    attention_mask = batch["attention_mask"].to(device)
+                    labels = batch["labels"].to(device)
+
+                    # Use AMP for inference too
+                    with torch.amp.autocast("cuda", enabled=use_amp, dtype=dtype):
+                        logits = model(input_ids, attention_mask)
+                        loss = criterion(logits, labels)
+
+                    val_loss += loss.item()
+
+                    preds = logits.argmax(dim=1)
+                    all_preds.extend(preds.cpu().tolist())
+                    all_labels.extend(labels.cpu().tolist())
+
+            # Calculate metrics
+            from sklearn.metrics import f1_score
+
+            avg_val_loss = val_loss / len(val_loader)
+            val_f1 = f1_score(all_labels, all_preds, average="macro")
+
+            # Use F1 as primary metric
+            metric = val_f1
+            best = max(best, metric)
 
         # Report to Optuna
         callbacks["on_epoch"](epoch, metric, avg_val_loss)
@@ -766,7 +859,7 @@ def make_sampler(multi_objective: bool, seed: int) -> optuna.samplers.BaseSample
 
 
 def objective_builder(
-    agent: str, outdir: str, multi_objective: bool
+    agent: str, outdir: str, multi_objective: bool, study_name: str = None
 ) -> Callable[[optuna.Trial], float]:
     def _obj(trial: optuna.Trial):
         seed = trial.suggest_int("seed", 1, 65535)
@@ -776,11 +869,29 @@ def objective_builder(
             "agent": agent,
             "seed": seed,
             "outdir": outdir,
-            "repo": "NoAug_Criteria_Evidence",
-            "aug": False,
+            "repo": "DataAug_Criteria_Evidence",
+            "aug": True,
         }
         if _HAS_MLFLOW:
-            mlflow.start_run(nested=True)
+            # Set experiment name based on agent and study
+            experiment_name = f"{agent}-HPO"
+            if study_name:
+                experiment_name = f"{agent}-{study_name}"
+            mlflow.set_experiment(experiment_name)
+
+            # Start run with trial number
+            mlflow.start_run(run_name=f"trial_{trial.number}", nested=True)
+
+            # Add Optuna tracking tags
+            mlflow.set_tags(
+                {
+                    "optuna_trial": trial.number,
+                    "optuna_study": study_name or "unknown",
+                    "agent": agent,
+                }
+            )
+
+            # Log hyperparameters
             mlflow.log_params(
                 {k: v for k, v in flatten_dict(cfg).items() if is_loggable(v)}
             )
@@ -792,12 +903,17 @@ def objective_builder(
             res = run_training_eval(cfg, {"on_epoch": _cb})
 
             if _HAS_MLFLOW:
+                # Log final metrics
                 mlflow.log_metrics(
                     {
                         "final_primary": res["primary"],
                         "runtime_s": res.get("runtime_s", float("nan")),
                     }
                 )
+
+                # Save config as artifact
+                mlflow.log_dict(cfg, "config.json")
+
                 mlflow.end_run()
 
             return res["primary"]
@@ -872,7 +988,7 @@ def main():
         "--storage",
         default=os.getenv(
             "OPTUNA_STORAGE",
-            f"sqlite:///{os.path.abspath('./_optuna/noaug.db')}",
+            f"sqlite:///{os.path.abspath('./_optuna/dataaug.db')}",
         ),
     )
     parser.add_argument(
@@ -911,7 +1027,9 @@ def main():
         pruner=pruner,
     )
 
-    objective = objective_builder(args.agent, args.outdir, args.multi_objective)
+    objective = objective_builder(
+        args.agent, args.outdir, args.multi_objective, args.study
+    )
     study.optimize(
         objective,
         n_trials=args.n_trials,

@@ -1,3 +1,9 @@
+"""Evaluation/prediction helpers for Evidence architecture.
+
+Provides a simple eval loop over a chosen split and a convenience predictor for
+raw contexts using the best checkpoint.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -81,6 +87,7 @@ def predict(
     checkpoint_name: str | None = None,
     batch_size: int = 8,
 ) -> list[dict[str, Any]]:
+    """Predict naive spans for raw contexts using argmax over start/end logits."""
     """Predict evidence spans from raw post texts."""
 
     tokenizer = AutoTokenizer.from_pretrained(

@@ -1,3 +1,10 @@
+"""Training engine for the Criteria architecture.
+
+Compact, dependency-light loop used by HPO and integration runners. It builds
+tokenised datasets from CSVs, initialises model/optim/scheduler, and runs a
+standard AMP-enabled training loop with periodic MLflow logging.
+"""
+
 from __future__ import annotations
 
 import math
@@ -43,6 +50,7 @@ def _flatten_dict(prefix: str, value: Any, accumulator: dict[str, Any]) -> None:
 
 
 def _seed_worker(worker_id: int) -> None:
+    """Derive a deterministic seed per worker using torch.initial_seed()."""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
@@ -53,6 +61,7 @@ def _prepare_datasets(
     tokenizer: AutoTokenizer,
     seed: int,
 ) -> tuple[Dataset, Dataset, Dataset | None]:
+    """Load CSV dataset and split into train/val/(optional) test subsets."""
     dataset_cfg = config.get("dataset", {})
     splits = dataset_cfg.get("splits", [0.8, 0.1, 0.1])
     if isinstance(splits, dict):
@@ -102,6 +111,7 @@ def _create_dataloaders(
     seed: int,
     device: torch.device,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Construct DataLoaders with deterministic seeds and sensible defaults."""
     dataset_cfg = config.get("dataset", {})
     training_cfg = config.get("training", {})
     num_workers = dataset_cfg.get("num_workers", 0)
@@ -151,6 +161,7 @@ def _create_dataloaders(
 
 
 def _build_model(config: dict[str, Any]) -> Model:
+    """Instantiate the classifier head on top of a pretrained encoder."""
     model_cfg = config.get("model", {})
     model_name = model_cfg.get("pretrained_model", "bert-base-uncased")
     num_labels = model_cfg.get("num_labels", 2)
@@ -164,6 +175,7 @@ def _build_model(config: dict[str, Any]) -> Model:
 
 
 def _select_device(config: dict[str, Any]) -> torch.device:
+    """Choose device in priority order: explicit > CUDA > MPS > CPU."""
     preferred = config.get("training", {}).get("device")
     if preferred:
         return torch.device(preferred)
@@ -177,6 +189,7 @@ def _select_device(config: dict[str, Any]) -> torch.device:
 def _create_optimizer(
     model: nn.Module, config: dict[str, Any]
 ) -> torch.optim.Optimizer:
+    """Create optimizer with weight‑decay/no‑decay parameter groups."""
     training_cfg = config.get("training", {})
     optimizer_cfg = training_cfg.get("optimizer", {}) or {}
     optimizer_name = optimizer_cfg.get("name", "adamw").lower()
@@ -234,6 +247,7 @@ def _create_scheduler(
     config: dict[str, Any],
     num_training_steps: int,
 ) -> Any | None:
+    """Create HF scheduler; supports cosine_with_restarts and linear, etc."""
     scheduler_cfg = config.get("training", {}).get("scheduler", {}) or {}
     scheduler_name = scheduler_cfg.get("name", "linear")
     if scheduler_name in (None, "", "none"):
@@ -260,6 +274,7 @@ def _create_scheduler(
 def _classification_metrics(
     predictions: torch.Tensor, targets: torch.Tensor
 ) -> dict[str, float]:
+    """Compute basic binary metrics; safe for zero‑division."""
     preds = predictions.argmax(dim=-1)
     correct = (preds == targets).sum().item()
     total = targets.numel()
@@ -288,6 +303,7 @@ def _evaluate(
     loss_fn: nn.Module,
     amp_enabled: bool,
 ) -> dict[str, float]:
+    """Validation pass with AMP and aggregate metrics."""
     model.eval()
     losses: list[float] = []
     all_preds: list[torch.Tensor] = []
@@ -319,6 +335,7 @@ def _evaluate(
 def _move_batch_to_device(
     batch: dict[str, torch.Tensor], device: torch.device
 ) -> dict[str, torch.Tensor]:
+    """Utility to send only tensors in a batch to device."""
     return {
         key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in batch.items()
@@ -331,6 +348,7 @@ def train(
     trial: optuna.Trial | None = None,
     resume: bool = True,
 ) -> dict[str, Any]:
+    """Run training for criteria task and return final metrics dict."""
     logger = get_logger(__name__)
     training_cfg = config.get("training", {})
     deterministic = training_cfg.get("deterministic", True)

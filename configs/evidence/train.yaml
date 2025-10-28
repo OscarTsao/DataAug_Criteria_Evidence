@@ -50,3 +50,7 @@ hydra:
   sweep:
     dir: outputs/evidence/multirun
     subdir: ${hydra.job.num}
+## Training overrides for Evidence task
+#
+# Use with Hydra composition to tailor epochs, batch sizes and runtime knobs
+# for Evidence experiments. Aligns with STRICT groundtruth derived from 'cases'.

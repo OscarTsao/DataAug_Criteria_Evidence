@@ -1,4 +1,10 @@
-"""Helpers to construct classification DataLoaders with optional augmentation."""
+"""Helpers to construct classification DataLoaders with optional augmentation.
+
+This module wires together:
+  - a tokenised dataset (lazy/eager)
+  - a collate function that can augment raw texts pre-tokenisation
+  - DataLoader worker seeding so augmentation remains deterministic with workers
+"""
 
 from __future__ import annotations
 
@@ -39,6 +45,7 @@ class ClassificationLoaders:
 
 
 def _as_aug_config(config: AugConfig | dict[str, Any] | None) -> AugConfig | None:
+    """Accept either an AugConfig instance or a plain dict for convenience."""
     if config is None or isinstance(config, AugConfig):
         return config
     return AugConfig(**config)
@@ -64,7 +71,12 @@ def build_evidence_classification_loaders(
     label_column: str = "label",
     tfidf_dir: str | Path = "_artifacts/tfidf/evidence",
 ) -> ClassificationLoaders:
-    """Create train/val/test DataLoaders for evidence classification."""
+    """Create train/val/test DataLoaders for evidence classification.
+
+    When augmentation is enabled, the train dataset defers tokenisation to the
+    collate function (``lazy_encode=True``) so transformations operate on raw
+    strings before tokenisation.
+    """
 
     aug_cfg = _as_aug_config(augment_config)
     augmentation: AugmentationArtifacts | None = None
@@ -135,6 +147,7 @@ def build_evidence_classification_loaders(
     )
 
     def _worker_init_fn(worker_id: int) -> None:
+        """Derive a unique seed per worker and propagate it to the pipeline."""
         derived_seed = worker_init(worker_id, seed)
         if augmentation:
             augmentation.pipeline.set_seed(derived_seed)

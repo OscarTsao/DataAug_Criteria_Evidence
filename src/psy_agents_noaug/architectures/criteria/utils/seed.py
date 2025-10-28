@@ -42,3 +42,6 @@ def set_seed(
                 pass
 
     return seed
+
+
+"""Reproducible seeding utilities for Criteria engine/workers."""

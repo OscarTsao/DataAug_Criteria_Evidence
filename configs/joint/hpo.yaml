@@ -61,3 +61,6 @@ search_space:
     distribution: uniform
     low: 0.5
     high: 2.0
+## HPO settings for Joint architecture
+#
+# Stage definitions/search spaces for joint models (dual encoders with fusion).

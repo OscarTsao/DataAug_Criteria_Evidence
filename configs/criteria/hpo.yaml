@@ -45,3 +45,7 @@ search_space:
       - []
       - [384]
       - [512, 256]
+## HPO settings for Criteria task
+#
+# Defines stage-specific Optuna settings and search space defaults used by
+# scripts/run_hpo_stage.py and scripts/tune_max.py.

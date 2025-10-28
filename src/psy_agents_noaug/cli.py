@@ -1,3 +1,16 @@
+"""CLI entrypoints for the PSY Agents NO‑AUG package.
+
+The CLI offers a thin, dependency-light interface for:
+  - training (stubbed here; wire to your project trainer)
+  - hyperparameter optimisation (delegates to scripts/tune_max.py)
+  - printing top‑K HPO results exported by the tuner script
+
+Design goals:
+  - Keep the surface simple and self-documenting
+  - Avoid importing heavy frameworks until subcommands run
+  - Be explicit about side effects (e.g., MLflow env vars)
+"""
+
 from __future__ import annotations
 
 import json
@@ -7,16 +20,27 @@ from pathlib import Path
 
 import typer
 
+# Top-level app: subcommands are declared below.
 app = typer.Typer(
     help="NoAug Criteria/Evidence: train, tune (HPO), eval, and show-best."
 )
 
 
 def _default_outdir(outdir: str | None) -> str:
+    """Return the provided output directory or a sensible default.
+
+    We keep default runtime artifacts under ./_runs to avoid polluting the
+    repository tree and to make it easy to clean up experiments locally.
+    """
     return outdir or "./_runs"
 
 
-def _ensure_mlflow(outdir: str):
+def _ensure_mlflow(outdir: str) -> None:
+    """Ensure MLflow writes to an isolated file store under ``outdir``.
+
+    The CLI uses a file URI to keep experiments local by default. Users can
+    still override via environment variables when needed.
+    """
     os.makedirs(outdir, exist_ok=True)
     mlruns = Path(outdir) / "mlruns"
     os.environ.setdefault("MLFLOW_TRACKING_URI", f"file:{mlruns.as_posix()}")
@@ -52,7 +76,14 @@ def train(
     loader_workers: int | None = typer.Option(None, "--loader-workers"),
     prefetch_factor: int | None = typer.Option(None, "--prefetch-factor"),
 ):
-    """Thin wrapper expected to call the project's trainer; implement as needed."""
+    """Run a training job.
+
+    Notes
+    -----
+    This command is intentionally thin to keep the CLI fast to import and
+    test. It prints the parsed configuration and environment so you can wire
+    it to your training entrypoint as needed for your environment.
+    """
     outdir = _default_outdir(outdir)
     _ensure_mlflow(outdir)
 
@@ -103,7 +134,11 @@ def tune(
     aug_ops_per_sample: int = typer.Option(1, "--aug-ops-per-sample"),
     aug_max_replace: float = typer.Option(0.3, "--aug-max-replace"),
 ):
-    """Invoke the maximal HPO driver (scripts/tune_max.py)."""
+    """Launch maximal HPO via ``scripts/tune_max.py``.
+
+    The CLI merely marshals arguments and environment. Search spaces and the
+    training bridge live inside the script to keep imports isolated.
+    """
     outdir = _default_outdir(outdir)
     _ensure_mlflow(outdir)
     storage = storage or f"sqlite:///{Path('./_optuna/noaug.db').absolute()}"
@@ -145,7 +180,10 @@ def show_best(
     outdir: str | None = typer.Option(None),
     topk: int = typer.Option(5),
 ):
-    """Pretty-print top-K trials exported by tune_max.py."""
+    """Pretty‑print top‑K trials exported by ``tune_max.py``.
+
+    Expects a JSON file produced by the tuner at ``{outdir}/{agent}_{study}_topk.json``.
+    """
     outdir = _default_outdir(outdir)
     path = Path(outdir) / f"{agent}_{study}_topk.json"
     if not path.exists():
@@ -167,7 +205,11 @@ def tune_supermax(
     outdir: str | None = typer.Option(None),
     storage: str | None = typer.Option(None),
 ):
-    """100-epoch trials with EarlyStopping(patience=20). Big n_trials by default."""
+    """Run very large HPO trials suitable for long-running servers.
+
+    Configures 100-epoch trials and patience-based early stopping via env vars
+    so downstream code does not need to be modified.
+    """
     outdir = _default_outdir(outdir)
     _ensure_mlflow(outdir)
     storage = storage or f"sqlite:///{Path('./_optuna/noaug.db').absolute()}"

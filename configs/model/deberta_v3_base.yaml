@@ -10,3 +10,6 @@ lora:
   r: 8
   alpha: 16
   dropout: 0.1
+## DeBERTa-v3-base configuration
+#
+# HF model identifier and encoder-level options for DeBERTa-v3.

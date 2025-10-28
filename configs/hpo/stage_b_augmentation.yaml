@@ -98,3 +98,6 @@ hpo:
 # - Model architecture parameters (model_name, learning_rate, etc.) are LOCKED
 # - Only augmentation parameters are optimized
 # - Baseline (augmentation_enabled=false) is always included for comparison
+## HPO Stage B — Augmentation sweep
+#
+# Search over augmentation-only parameters on top of a strong baseline study.

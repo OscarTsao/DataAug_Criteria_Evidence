@@ -107,6 +107,7 @@ class Trainer:
         self._aug_examples_logged = False
 
         use_scaler = self.use_amp and self.amp_dtype == torch.float16
+        # AMP gradient scaler (enabled only for float16 on CUDA)
         self.scaler = GradScaler("cuda", enabled=use_scaler)
 
         if self.save_dir:
@@ -137,6 +138,7 @@ class Trainer:
         correct = 0
         total = 0
 
+        # Lightweight throughput telemetry using an EMA of timings
         ema_window = 10
         ema_alpha = 2.0 / (ema_window + 1)
         data_time_ema: float | None = None
@@ -222,7 +224,7 @@ class Trainer:
                         step=self.global_step,
                     )
 
-            # Track metrics
+            # Track metrics for the whole epoch
             total_loss += loss.item() * self.gradient_accumulation_steps
             preds = torch.argmax(logits, dim=-1)
             correct += (preds == labels).sum().item()
@@ -255,11 +257,21 @@ class Trainer:
 
     @staticmethod
     def _sanitize_method_name(name: str) -> str:
+        """Normalise augmenter names for MLflow metric keys.
+
+        MLflow metric keys must be simple strings without path separators or
+        special characters; we replace a few common ones here.
+        """
         return (
             name.replace("/", "_").replace(".", "_").replace(" ", "_").replace("-", "_")
         )
 
     def _log_augmentation_metrics(self, epoch: int) -> None:
+        """Log augmentation usage statistics and examples to MLflow.
+
+        Called once per epoch (after validation). Example pairs are written as
+        a JSONL artifact only once per run to keep IO bounded.
+        """
         if not self.augmenter_pipeline:
             return
 
@@ -296,7 +308,11 @@ class Trainer:
                 self._aug_examples_logged = True
 
     def _log_augmentation_params(self) -> None:
-        """Log augmentation configuration once per training run."""
+        """Log augmentation configuration once per training run.
+
+        Accepts both plain dicts and dataclass objects to remain flexible with
+        different call sites (Hydra configs vs. CLI dictionaries).
+        """
         if mlflow.active_run() is None:
             return
 
@@ -392,6 +408,7 @@ class Trainer:
             all_labels, all_preds, average="macro", zero_division=0
         )
 
+        # AUROC calculation is guarded because it can fail in corner cases
         auroc_macro: float | None = None
         try:
             if probabilities.size == 0:
@@ -417,8 +434,13 @@ class Trainer:
 
     def save_checkpoint(
         self, epoch: int, metrics: dict[str, float], is_best: bool = False
-    ):
-        """Save model checkpoint with full training state."""
+    ) -> None:
+        """Save model checkpoint with optimizer/scheduler/scaler state.
+
+        Two files are maintained in ``save_dir``:
+          - ``latest_checkpoint.pt``: always updated
+          - ``best_checkpoint.pt``: updated only when metric improves
+        """
         if not self.save_dir:
             return
 
@@ -448,7 +470,7 @@ class Trainer:
             )
 
     def check_improvement(self, current_value: float) -> bool:
-        """Check if current metric value is an improvement."""
+        """Check whether the early‑stopping metric improved by ``min_delta``."""
         if self.early_stopping_mode == "max":
             return current_value > (self.best_metric_value + self.min_delta)
         return current_value < (self.best_metric_value - self.min_delta)

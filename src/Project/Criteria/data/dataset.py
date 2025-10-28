@@ -86,7 +86,7 @@ class CriteriaDataset(Dataset):
 
         # Apply augmentation if enabled and in training mode
         if self.augmentation_pipeline and self.is_training:
-            text = self.augmentation_pipeline.augment(text)
+            text = self.augmentation_pipeline(text)
 
         encoded = self.tokenizer(
             text,

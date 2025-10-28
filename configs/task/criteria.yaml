@@ -1,4 +1,7 @@
 # Criteria extraction task configuration
+#
+# Aligns with groundtruth produced by data/groundtruth.py:
+# - labels come from the 'status' field only (STRICT rule)
 
 name: "criteria"
 type: "binary_classification"

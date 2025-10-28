@@ -1,4 +1,16 @@
-"""Dataset builders for training and evaluation splits."""
+"""Dataset builders for training and evaluation splits.
+
+Key ideas
+---------
+1) Two tokenisation modes are supported:
+   - eager: tokenise once during dataset construction (fewer CPU cycles)
+   - lazy:  defer tokenisation to the collate_fn (needed for on‑the‑fly
+            augmentation before tokenisation)
+
+2) When augmentation is enabled, we pass raw strings through the pipeline in
+   the collate_fn, then call the tokenizer for the whole batch to leverage
+   fast tokenisers and vectorised padding/truncation.
+"""
 
 from __future__ import annotations
 
@@ -64,9 +76,11 @@ class ClassificationDataset(Dataset):
         self._text_pairs = text_pairs
 
         if self.lazy_encode:
+            # Defer tokenisation to collate_fn; store raw strings only
             self.input_ids = None
             self.attention_mask = None
         else:
+            # Eager path: pre-tokenise texts at construction time
             encoded = tokenizer(
                 texts,
                 text_pair=text_pairs,
@@ -112,12 +126,14 @@ class ClassificationDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         if self.lazy_encode:
+            # Return raw texts for collate_fn to augment and tokenise
             item: dict[str, object] = {
                 "text": self._texts[idx],
                 "text_pair": self._text_pairs[idx] if self._text_pairs else None,
                 "labels": self.labels[idx],
             }
         else:
+            # Return ready‑to‑use tensors for the model
             item = {
                 "input_ids": self.input_ids[idx],
                 "attention_mask": self.attention_mask[idx],
@@ -146,6 +162,12 @@ def create_classification_collate(
     """Create collate_fn that handles optional augmentation before tokenization."""
 
     def _collate(batch: list[dict[str, object]]) -> dict[str, torch.Tensor]:
+        """Batch builder with optional augmentation and on‑the‑fly tokenisation.
+
+        Workflow when not pre‑tokenised:
+          1) optionally augment each raw sample (text and optional pair)
+          2) call the HF tokenizer once for the whole batch for efficiency
+        """
         if not batch:
             raise ValueError("Received empty batch in collate function")
 

@@ -31,3 +31,6 @@ ensemble:
   n_models: 5
   voting: "soft"
   aggregation: "mean"
+## HPO Stage 3 — Refit
+#
+# Train a final model using best hyperparameters found in earlier stages.
