@@ -57,6 +57,115 @@ class TestDataLoaderPerformance:
         if kwargs["num_workers"] > 0:
             assert kwargs.get("persistent_workers", False) is True
 
+    @pytest.mark.slow
+    @pytest.mark.skipif(
+        not torch.cuda.is_available(), reason="Requires CUDA for meaningful test"
+    )
+    def test_data_step_ratio_below_threshold(self):
+        """Test that data loading time / step time ratio stays below 0.40.
+
+        This ensures GPU is not starved waiting for data. A ratio > 0.40 indicates
+        the DataLoader is bottlenecking training performance.
+
+        This test can be skipped on slow CI with: pytest -m "not slow"
+        """
+        from torch.utils.data import DataLoader, Dataset
+
+        class DummyDataset(Dataset):
+            """Fast synthetic dataset for testing."""
+
+            def __init__(self, size=100):
+                self.size = size
+
+            def __len__(self):
+                return self.size
+
+            def __getitem__(self, idx):
+                # Simulate tokenized text: (input_ids, attention_mask, labels)
+                return {
+                    "input_ids": torch.randint(0, 1000, (128,)),
+                    "attention_mask": torch.ones(128, dtype=torch.long),
+                    "labels": torch.randint(0, 2, (1,)),
+                }
+
+        # Create DataLoader with optimized settings
+        from psy_agents_noaug.utils.reproducibility import get_optimal_dataloader_kwargs
+
+        device = torch.device("cuda")
+        dataloader_kwargs = get_optimal_dataloader_kwargs(device, num_workers=4)
+
+        dataset = DummyDataset(size=50)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=16,
+            shuffle=False,
+            **dataloader_kwargs,
+        )
+
+        # Create simple model for timing
+        from transformers import AutoModel
+
+        model = AutoModel.from_pretrained("bert-base-uncased").to(device)
+        model.train()
+
+        # Warmup
+        for batch in dataloader:
+            inputs = {k: v.to(device) for k, v in batch.items() if k != "labels"}
+            with torch.no_grad():
+                _ = model(**inputs)
+            break
+
+        # Measure data loading time and step time
+        data_times = []
+        step_times = []
+
+        data_start = time.time()
+        for batch in dataloader:
+            data_time = time.time() - data_start
+            data_times.append(data_time)
+
+            # Transfer to GPU (part of data loading)
+            inputs = {k: v.to(device) for k, v in batch.items() if k != "labels"}
+
+            # Measure step time (forward + backward)
+            torch.cuda.synchronize()
+            step_start = time.time()
+
+            outputs = model(**inputs)
+            loss = outputs.last_hidden_state.mean()
+            loss.backward()
+
+            torch.cuda.synchronize()
+            step_time = time.time() - step_start
+            step_times.append(step_time)
+
+            data_start = time.time()
+
+        # Calculate average times (excluding first batch for warmup)
+        avg_data_time = sum(data_times[1:]) / len(data_times[1:])
+        avg_step_time = sum(step_times[1:]) / len(step_times[1:])
+
+        # Calculate ratio
+        data_step_ratio = (
+            avg_data_time / avg_step_time if avg_step_time > 0 else float("inf")
+        )
+
+        # Performance contract: data/step ratio must be <= 0.40
+        threshold = 0.40
+        assert data_step_ratio <= threshold, (
+            f"Data/step ratio {data_step_ratio:.3f} exceeds threshold {threshold:.2f}. "
+            f"GPU is starved waiting for data. "
+            f"Avg data time: {avg_data_time*1000:.1f}ms, "
+            f"Avg step time: {avg_step_time*1000:.1f}ms. "
+            f"Consider increasing num_workers or enabling persistent_workers."
+        )
+
+        # Also verify reasonable absolute times
+        assert avg_data_time < 0.5, f"Data loading too slow: {avg_data_time*1000:.1f}ms"
+        assert (
+            avg_step_time > 0.001
+        ), f"Step time suspiciously fast: {avg_step_time*1000:.1f}ms"
+
 
 class TestModelPerformance:
     """Test model performance characteristics."""
@@ -88,7 +197,7 @@ class TestModelPerformance:
 
         start = time.time()
         with torch.no_grad():
-            outputs = model(**inputs)
+            _ = model(**inputs)
         duration = time.time() - start
 
         # Forward pass should complete in < 1 second on CPU
@@ -247,7 +356,7 @@ class TestTrainingLoopPerformance:
         # Simulate gradient accumulation
         grad_accum_steps = 4
 
-        for step in range(grad_accum_steps):
+        for _ in range(grad_accum_steps):
             dummy_input = torch.randn(2, 10)
             output = model(dummy_input)
             loss = output.mean()

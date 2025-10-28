@@ -3,7 +3,8 @@
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
-.PHONY: tune-criteria-max tune-evidence-max tune-share-max tune-joint-max
+.PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
+.PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
@@ -48,6 +49,9 @@ help:
 	@echo "  make refit              - Stage 3: Refit best model on train+val"
 	@echo "  make full-hpo-all       - Multi-stage HPO for ALL architectures"
 	@echo "  make maximal-hpo-all    - Maximal HPO for ALL architectures"
+	@echo "  make tune-evidence-3stage-full   - 3-Stage Evidence HPO: A→B→C (1200+600+240 trials)"
+	@echo "  make tune-evidence-3stage-smoke  - 3-Stage Evidence Smoke Test (10+12+8 trials, 3 epochs)"
+	@echo "  make tune-criteria-3stage-full   - 3-Stage Criteria HPO: A→B→C (800+400+160 trials)"
 	@echo "  make tune-criteria-supermax  - Super-max HPO: criteria (5000 trials, 100 epochs)"
 	@echo "  make tune-evidence-supermax  - Super-max HPO: evidence (8000 trials, 100 epochs)"
 	@echo "  make tune-share-supermax     - Super-max HPO: share (3000 trials, 100 epochs)"
@@ -450,7 +454,36 @@ tune-criteria-max:
 tune-evidence-max:
 	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
 	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
-	python scripts/tune_max.py --agent evidence --study noaug-evidence-max --n-trials 1200 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+	python scripts/tune_max.py --agent evidence --stage A --study noaug-evidence-max --n-trials 1200 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+tune-evidence-aug:
+	@if [ -z "$${FROM_STUDY}" ]; then \
+		echo "FROM_STUDY must point to the Stage-A study (e.g., noaug-evidence-max)"; \
+		exit 1; \
+	fi
+	@HPO_EPOCHS?=60; HPO_PATIENCE?=15; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
+	python scripts/tune_max.py --agent evidence --stage B \
+		--study $${STAGE_B_STUDY:-aug-evidence-ext} \
+		--from-study $${FROM_STUDY} \
+		--n-trials $${N_TRIALS_STAGE_B:-600} \
+		--parallel $${PAR_STAGE_B:-4} \
+		--outdir $${HPO_OUTDIR:-./_runs}
+
+tune-evidence-joint:
+	@if [ -z "$${FROM_STUDY}" ]; then \
+		echo "FROM_STUDY must point to the Stage-B study (e.g., aug-evidence-ext)"; \
+		exit 1; \
+	fi
+	@HPO_EPOCHS?=80; HPO_PATIENCE?=20; \
+	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
+	python scripts/tune_max.py --agent evidence --stage C \
+		--study $${STAGE_C_STUDY:-aug-evidence-joint} \
+		--from-study $${FROM_STUDY} \
+		--pareto-limit $${PARETO_LIMIT:-5} \
+		--n-trials $${N_TRIALS_STAGE_C:-240} \
+		--parallel $${PAR_STAGE_C:-2} \
+		--outdir $${HPO_OUTDIR:-./_runs}
 
 tune-share-max:
 	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
@@ -461,6 +494,84 @@ tune-joint-max:
 	@HPO_EPOCHS?=100; HPO_PATIENCE?=20; \
 	HPO_EPOCHS=$$HPO_EPOCHS HPO_PATIENCE=$$HPO_PATIENCE \
 	python scripts/tune_max.py --agent joint --study noaug-joint-max --n-trials 600 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+
+#==============================================================================
+# 3-Stage HPO Workflows (Convenience Targets)
+#==============================================================================
+
+## tune-evidence-3stage-full: Run full 3-stage Evidence HPO (A→B→C) automatically
+tune-evidence-3stage-full:
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo "$(BLUE)Starting 3-Stage Evidence HPO Workflow$(NC)"
+	@echo "$(BLUE)Stage A: Baseline (1200 trials) → Stage B: Aug (600 trials) → Stage C: Joint (240 trials)$(NC)"
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo ""
+	@echo "$(GREEN)[Stage A] Running baseline HPO (no augmentation)...$(NC)"
+	@$(MAKE) tune-evidence-max
+	@echo ""
+	@echo "$(GREEN)[Stage B] Running augmentation search...$(NC)"
+	@FROM_STUDY=noaug-evidence-max $(MAKE) tune-evidence-aug
+	@echo ""
+	@echo "$(GREEN)[Stage C] Running joint refinement...$(NC)"
+	@FROM_STUDY=aug-evidence-ext $(MAKE) tune-evidence-joint
+	@echo ""
+	@echo "$(GREEN)✓ 3-Stage Evidence HPO Complete!$(NC)"
+	@echo "$(YELLOW)Results:$(NC)"
+	@echo "  Stage A (Baseline): noaug-evidence-max"
+	@echo "  Stage B (Aug): aug-evidence-ext"
+	@echo "  Stage C (Joint): aug-evidence-joint"
+
+## tune-evidence-3stage-smoke: Run smoke test 3-stage HPO (reduced trials for testing)
+tune-evidence-3stage-smoke:
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo "$(BLUE)Starting 3-Stage Evidence HPO Smoke Test$(NC)"
+	@echo "$(BLUE)Stage A: 10 trials → Stage B: 12 trials → Stage C: 8 trials$(NC)"
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo ""
+	@echo "$(GREEN)[Stage A] Smoke test: baseline (10 trials, 3 epochs)...$(NC)"
+	@HPO_EPOCHS=3 python scripts/tune_max.py --agent evidence --stage A \
+		--study smoke-evidence-baseline --n-trials 10 --parallel 2 \
+		--outdir $${HPO_OUTDIR:-./_runs}
+	@echo ""
+	@echo "$(GREEN)[Stage B] Smoke test: augmentation search (12 trials, 3 epochs)...$(NC)"
+	@HPO_EPOCHS=3 python scripts/tune_max.py --agent evidence --stage B \
+		--study smoke-evidence-aug --from-study smoke-evidence-baseline \
+		--n-trials 12 --parallel 2 --outdir $${HPO_OUTDIR:-./_runs}
+	@echo ""
+	@echo "$(GREEN)[Stage C] Smoke test: joint refinement (8 trials, 3 epochs)...$(NC)"
+	@HPO_EPOCHS=3 python scripts/tune_max.py --agent evidence --stage C \
+		--study smoke-evidence-joint --from-study smoke-evidence-aug \
+		--pareto-limit 3 --n-trials 8 --parallel 2 --outdir $${HPO_OUTDIR:-./_runs}
+	@echo ""
+	@echo "$(GREEN)✓ 3-Stage Evidence Smoke Test Complete!$(NC)"
+	@echo "$(YELLOW)Results:$(NC)"
+	@echo "  Stage A: smoke-evidence-baseline (10 trials)"
+	@echo "  Stage B: smoke-evidence-aug (12 trials)"
+	@echo "  Stage C: smoke-evidence-joint (8 trials)"
+
+## tune-criteria-3stage-full: Run full 3-stage Criteria HPO (A→B→C) automatically
+tune-criteria-3stage-full:
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo "$(BLUE)Starting 3-Stage Criteria HPO Workflow$(NC)"
+	@echo "$(BLUE)Stage A: Baseline (800 trials) → Stage B: Aug (400 trials) → Stage C: Joint (160 trials)$(NC)"
+	@echo "$(BLUE)=====================================================================$(NC)"
+	@echo ""
+	@echo "$(GREEN)[Stage A] Running baseline HPO (no augmentation)...$(NC)"
+	@$(MAKE) tune-criteria-max
+	@echo ""
+	@echo "$(GREEN)[Stage B] Running augmentation search...$(NC)"
+	@FROM_STUDY=noaug-criteria-max HPO_EPOCHS=60 N_TRIALS_STAGE_B=400 \
+		python scripts/tune_max.py --agent criteria --stage B \
+		--study aug-criteria-ext --from-study noaug-criteria-max \
+		--n-trials 400 --parallel 4 --outdir $${HPO_OUTDIR:-./_runs}
+	@echo ""
+	@echo "$(GREEN)[Stage C] Running joint refinement...$(NC)"
+	@FROM_STUDY=aug-criteria-ext HPO_EPOCHS=80 N_TRIALS_STAGE_C=160 \
+		python scripts/tune_max.py --agent criteria --stage C \
+		--study aug-criteria-joint --from-study aug-criteria-ext \
+		--pareto-limit 5 --n-trials 160 --parallel 2 --outdir $${HPO_OUTDIR:-./_runs}
+	@echo ""
+	@echo "$(GREEN)✓ 3-Stage Criteria HPO Complete!$(NC)"
 
 #==============================================================================
 # Super-Max HPO (100 epochs + EarlyStopping, very high trial counts)
