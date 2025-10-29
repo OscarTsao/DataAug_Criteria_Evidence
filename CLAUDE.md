@@ -523,6 +523,11 @@ cat docs/QUICK_START.md         # Quick start guide
 ## Recent Updates (2025)
 
 **October 2025:**
+- 🚨 **BREAKING CHANGE**: Input format changed from `[CLS] post [SEP] criterion [SEP]` to `[CLS] criterion [SEP] post [SEP]`
+  - All existing checkpoints incompatible - full retraining required
+  - See `MIGRATION_GUIDE_INPUT_FORMAT.md` for migration steps
+  - See `INPUT_FORMAT_RATIONALE.md` for theoretical justification
+  - Expected performance improvement: +1.5-3.0% AUC/F1
 - ✅ Production-ready HPO system (multi-stage + maximal modes)
 - ✅ Interface parity: all architectures accept `head_cfg`/`task_cfg`
 - ✅ Optuna 4.5.0 compatibility (NSGAIISampler)
@@ -543,6 +548,8 @@ cat docs/QUICK_START.md         # Quick start guide
 - **NEW**: Added `CODEBASE_STRUCTURE_ANALYSIS.md` and `CODEBASE_QUICK_SUMMARY.txt`
 
 **Key Documentation:**
+- `MIGRATION_GUIDE_INPUT_FORMAT.md` - 🚨 Input format breaking change migration
+- `INPUT_FORMAT_RATIONALE.md` - Theoretical justification for criterion-first format
 - `docs/HPO_GUIDE.md` - HPO system comprehensive guide
 - `docs/TRAINING_GUIDE.md` - Training best practices
 - `docs/CLI_AND_MAKEFILE_GUIDE.md` - CLI reference

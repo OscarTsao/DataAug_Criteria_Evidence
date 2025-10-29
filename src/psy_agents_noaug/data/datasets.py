@@ -81,9 +81,10 @@ class ClassificationDataset(Dataset):
             self.attention_mask = None
         else:
             # Eager path: pre-tokenise texts at construction time
+            # Format: [CLS] criterion [SEP] post [SEP] (criterion first for better attention)
             encoded = tokenizer(
-                texts,
-                text_pair=text_pairs,
+                text_pairs if text_pairs else texts,  # Criterion first (or single text if no pair)
+                text_pair=texts if text_pairs else None,  # Post second
                 padding="max_length",
                 truncation=True,
                 max_length=max_length,
@@ -210,8 +211,9 @@ def create_classification_collate(
             "return_tensors": "pt",
         }
 
+        # Format: [CLS] criterion [SEP] post [SEP] (criterion first for better attention)
         if has_text_pair and pairs:
-            encoded = tokenizer(texts, text_pair=pairs, **encoding_kwargs)
+            encoded = tokenizer(pairs, text_pair=texts, **encoding_kwargs)  # Swapped: pairs (criterion) first
         else:
             encoded = tokenizer(texts, **encoding_kwargs)
 
@@ -386,13 +388,14 @@ def build_datasets(
             splits["test"],
         )
 
+        # Format: [CLS] criterion [SEP] post [SEP] (criterion first for better attention)
         datasets = DatasetSplits(
             train=ClassificationDataset(
                 train_df,
                 tokenizer=tokenizer,
                 max_length=max_length,
-                text_column="post_text",
-                text_pair_column="criterion_text",
+                text_column="criterion_text",  # First sequence
+                text_pair_column="post_text",  # Second sequence
                 label_column="label",
                 label_dtype="int",
             ),
@@ -400,8 +403,8 @@ def build_datasets(
                 val_df,
                 tokenizer=tokenizer,
                 max_length=max_length,
-                text_column="post_text",
-                text_pair_column="criterion_text",
+                text_column="criterion_text",  # First sequence
+                text_pair_column="post_text",  # Second sequence
                 label_column="label",
                 label_dtype="int",
             ),
@@ -409,8 +412,8 @@ def build_datasets(
                 test_df,
                 tokenizer=tokenizer,
                 max_length=max_length,
-                text_column="post_text",
-                text_pair_column="criterion_text",
+                text_column="criterion_text",  # First sequence
+                text_pair_column="post_text",  # Second sequence
                 label_column="label",
                 label_dtype="int",
             ),

@@ -48,7 +48,12 @@ def _as_aug_config(config: AugConfig | dict[str, Any] | None) -> AugConfig | Non
     """Accept either an AugConfig instance or a plain dict for convenience."""
     if config is None or isinstance(config, AugConfig):
         return config
-    return AugConfig(**config)
+    cfg_dict = dict(config)
+    if "max_replace" not in cfg_dict and "max_replace_ratio" in cfg_dict:
+        cfg_dict["max_replace"] = cfg_dict.pop("max_replace_ratio")
+    if "enabled" not in cfg_dict:
+        cfg_dict["enabled"] = bool(cfg_dict.get("methods")) or cfg_dict.get("lib") not in (None, "none")
+    return AugConfig(**cfg_dict)
 
 
 def build_evidence_classification_loaders(
@@ -66,12 +71,15 @@ def build_evidence_classification_loaders(
     prefetch_factor: int | None = 4,
     pin_memory: bool = True,
     persistent_workers: bool | None = True,
-    text_column: str = "input_text",
-    text_pair_column: str | None = "criterion_text",
+    text_column: str = "criterion_text",  # First sequence (criterion)
+    text_pair_column: str | None = "input_text",  # Second sequence (post/input)
     label_column: str = "label",
     tfidf_dir: str | Path = "_artifacts/tfidf/evidence",
 ) -> ClassificationLoaders:
     """Create train/val/test DataLoaders for evidence classification.
+
+    Input format: [CLS] criterion_text [SEP] input_text [SEP]
+    This matches the order used in span extraction tasks for consistency.
 
     When augmentation is enabled, the train dataset defers tokenisation to the
     collate function (``lazy_encode=True``) so transformations operate on raw

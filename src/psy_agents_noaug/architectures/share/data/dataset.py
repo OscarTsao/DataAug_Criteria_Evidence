@@ -187,9 +187,10 @@ class ShareDataset(Dataset):
 
         start_char, end_char = _find_answer_span(context, answer)
 
+        # Format: [CLS] criterion [SEP] context [SEP] (criterion first for better attention)
         encoded = self.tokenizer(
-            context,
-            criterion_text,
+            criterion_text,  # First sequence
+            context,  # Second sequence
             padding=self.padding,
             truncation=self.truncation,
             max_length=self.max_length,

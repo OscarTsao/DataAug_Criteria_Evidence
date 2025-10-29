@@ -133,9 +133,10 @@ class CriteriaDataset(Dataset):
         label = int(example[self.label_column])
         criterion_text = self._get_criterion_text(example)
 
+        # Format: [CLS] criterion [SEP] text [SEP] (criterion first for better attention)
         encoded = self.tokenizer(
-            text,
-            criterion_text,
+            criterion_text,  # First sequence
+            text,  # Second sequence
             padding=self.padding,
             truncation=self.truncation,
             max_length=self.max_length,

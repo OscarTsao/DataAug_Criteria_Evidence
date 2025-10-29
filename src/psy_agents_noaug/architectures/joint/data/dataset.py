@@ -201,9 +201,10 @@ class JointDataset(Dataset):
         label = int(example[self.label_column])
         criterion_text = self._get_criterion_text(example)
 
+        # Format: [CLS] criterion [SEP] sentence [SEP] (criterion first for better attention)
         criteria_encoded = self.criteria_tokenizer(
-            sentence,
-            criterion_text,
+            criterion_text,  # First sequence
+            sentence,  # Second sequence
             padding=self.padding,
             truncation=self.truncation,
             max_length=self.criteria_max_length,
@@ -211,9 +212,10 @@ class JointDataset(Dataset):
         )
 
         start_char, end_char = _find_answer_span(context, sentence)
+        # Format: [CLS] criterion [SEP] context [SEP] (criterion first for better attention)
         evidence_encoded = self.evidence_tokenizer(
-            context,
-            criterion_text,
+            criterion_text,  # First sequence
+            context,  # Second sequence
             padding=self.padding,
             truncation=self.truncation,
             max_length=self.evidence_max_length,
