@@ -187,29 +187,42 @@ train-evidence:
 HPO_TASK ?= criteria
 HPO_MODEL ?= roberta_base
 
-## hpo-s0: Run HPO stage 0 (sanity check with 2 trials)
+## hpo-s0: Run HPO stage 0 (sanity check with 8 trials)
 hpo-s0:
-	@echo "$(BLUE)Running HPO Stage 0: Sanity Check$(NC)"
-	poetry run python scripts/run_hpo_stage.py hpo=stage0_sanity task=$(HPO_TASK) model=$(HPO_MODEL)
+	@echo "$(BLUE)Running HPO Stage 0: Sanity Check (8 trials, 3 epochs)$(NC)"
+	HPO_EPOCHS=3 HPO_PATIENCE=5 poetry run python scripts/tune_max.py \
+		--agent $(HPO_TASK) \
+		--study $(HPO_TASK)-stage0-sanity \
+		--n-trials 8 \
+		--parallel 1 \
+		--outdir outputs/hpo_stage0
 
 ## hpo-s1: Run HPO stage 1 (coarse search with 20 trials)
 hpo-s1:
-	@echo "$(BLUE)Running HPO Stage 1: Coarse Search$(NC)"
-	poetry run python scripts/run_hpo_stage.py hpo=stage1_coarse task=$(HPO_TASK) model=$(HPO_MODEL)
+	@echo "$(BLUE)Running HPO Stage 1: Coarse Search (20 trials)$(NC)"
+	HPO_EPOCHS=$${HPO_EPOCHS:-10} HPO_PATIENCE=$${HPO_PATIENCE:-10} poetry run python scripts/tune_max.py \
+		--agent $(HPO_TASK) \
+		--study $(HPO_TASK)-stage1-coarse \
+		--n-trials 20 \
+		--parallel 1 \
+		--outdir outputs/hpo_stage1
 
 ## hpo-s2: Run HPO stage 2 (fine search with 50 trials)
 hpo-s2:
-	@echo "$(BLUE)Running HPO Stage 2: Fine Search$(NC)"
-	poetry run python scripts/run_hpo_stage.py hpo=stage2_fine task=$(HPO_TASK) model=$(HPO_MODEL)
+	@echo "$(BLUE)Running HPO Stage 2: Fine Search (50 trials)$(NC)"
+	HPO_EPOCHS=$${HPO_EPOCHS:-15} HPO_PATIENCE=$${HPO_PATIENCE:-15} poetry run python scripts/tune_max.py \
+		--agent $(HPO_TASK) \
+		--study $(HPO_TASK)-stage2-fine \
+		--n-trials 50 \
+		--parallel 1 \
+		--outdir outputs/hpo_stage2
 
 ## refit: Run HPO stage 3 (refit best model on train+val)
 refit:
 	@echo "$(BLUE)Running HPO Stage 3: Refit Best Model$(NC)"
-	@if [ ! -f "outputs/hpo_stage2/best_config.yaml" ]; then \
-		echo "$(RED)✗ No best config found. Run hpo-s2 first.$(NC)"; \
-		exit 1; \
-	fi
-	poetry run python scripts/run_hpo_stage.py hpo=stage3_refit task=$(HPO_TASK) best_config=outputs/hpo_stage2/best_config.yaml
+	@echo "$(YELLOW)Note: Use best config from stage 2 (outputs/hpo_stage2/$(HPO_TASK)_*/best_trial.json)$(NC)"
+	@echo "$(YELLOW)Refit training should be done via: make train or scripts/train_*.py$(NC)"
+	@echo "$(RED)Automated refit not yet implemented - manual training required$(NC)"
 
 #==============================================================================
 # Evaluation
