@@ -260,7 +260,9 @@ def save_splits_json(
         "metadata": metadata or {},
     }
 
-    splits_data["metadata"].update(
+    # Type hint for mypy: metadata is a dict, not Collection[str]
+    metadata_dict: dict[str, Any] = splits_data["metadata"]  # type: ignore[assignment]
+    metadata_dict.update(
         {
             "train_count": len(train_post_ids),
             "val_count": len(val_post_ids),

@@ -83,7 +83,9 @@ class ClassificationDataset(Dataset):
             # Eager path: pre-tokenise texts at construction time
             # Format: [CLS] criterion [SEP] post [SEP] (criterion first for better attention)
             encoded = tokenizer(
-                text_pairs if text_pairs else texts,  # Criterion first (or single text if no pair)
+                (
+                    text_pairs if text_pairs else texts
+                ),  # Criterion first (or single text if no pair)
                 text_pair=texts if text_pairs else None,  # Post second
                 padding="max_length",
                 truncation=True,
@@ -135,6 +137,9 @@ class ClassificationDataset(Dataset):
             }
         else:
             # Return ready‑to‑use tensors for the model
+            # In eager mode, input_ids and attention_mask are pre-computed
+            assert self.input_ids is not None, "input_ids should be set in eager mode"
+            assert self.attention_mask is not None, "attention_mask should be set in eager mode"
             item = {
                 "input_ids": self.input_ids[idx],
                 "attention_mask": self.attention_mask[idx],
@@ -213,7 +218,9 @@ def create_classification_collate(
 
         # Format: [CLS] criterion [SEP] post [SEP] (criterion first for better attention)
         if has_text_pair and pairs:
-            encoded = tokenizer(pairs, text_pair=texts, **encoding_kwargs)  # Swapped: pairs (criterion) first
+            encoded = tokenizer(
+                pairs, text_pair=texts, **encoding_kwargs
+            )  # Swapped: pairs (criterion) first
         else:
             encoded = tokenizer(texts, **encoding_kwargs)
 

@@ -164,7 +164,7 @@ def create_criteria_groundtruth(
 
     # Create working DataFrame
     df = annotations[[post_id_field, criterion_id_field, status_field]].copy()
-    df.columns = ["post_id", "criterion_id", "status"]
+    df.columns = ["post_id", "criterion_id", "status"]  # type: ignore[assignment]
 
     # Normalize status values to binary labels
     status_map = field_map.get("status_values", {})
@@ -253,7 +253,7 @@ def create_evidence_groundtruth(
 
     # Create working DataFrame
     df = annotations[[post_id_field, criterion_id_field, cases_field]].copy()
-    df.columns = ["post_id", "criterion_id", "cases"]
+    df.columns = ["post_id", "criterion_id", "cases"]  # type: ignore[assignment]
 
     # Parse cases field and explode
     df["cases_parsed"] = df["cases"].apply(parse_cases_field)
