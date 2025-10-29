@@ -190,17 +190,17 @@ HPO_MODEL ?= roberta_base
 ## hpo-s0: Run HPO stage 0 (sanity check with 2 trials)
 hpo-s0:
 	@echo "$(BLUE)Running HPO Stage 0: Sanity Check$(NC)"
-	poetry run python -m psy_agents_noaug.cli hpo hpo=stage0_sanity task=$(HPO_TASK) model=$(HPO_MODEL)
+	poetry run python scripts/run_hpo_stage.py hpo=stage0_sanity task=$(HPO_TASK) model=$(HPO_MODEL)
 
 ## hpo-s1: Run HPO stage 1 (coarse search with 20 trials)
 hpo-s1:
 	@echo "$(BLUE)Running HPO Stage 1: Coarse Search$(NC)"
-	poetry run python -m psy_agents_noaug.cli hpo hpo=stage1_coarse task=$(HPO_TASK) model=$(HPO_MODEL)
+	poetry run python scripts/run_hpo_stage.py hpo=stage1_coarse task=$(HPO_TASK) model=$(HPO_MODEL)
 
 ## hpo-s2: Run HPO stage 2 (fine search with 50 trials)
 hpo-s2:
 	@echo "$(BLUE)Running HPO Stage 2: Fine Search$(NC)"
-	poetry run python -m psy_agents_noaug.cli hpo hpo=stage2_fine task=$(HPO_TASK) model=$(HPO_MODEL)
+	poetry run python scripts/run_hpo_stage.py hpo=stage2_fine task=$(HPO_TASK) model=$(HPO_MODEL)
 
 ## refit: Run HPO stage 3 (refit best model on train+val)
 refit:
@@ -209,7 +209,7 @@ refit:
 		echo "$(RED)✗ No best config found. Run hpo-s2 first.$(NC)"; \
 		exit 1; \
 	fi
-	poetry run python -m psy_agents_noaug.cli refit task=$(HPO_TASK) best_config=outputs/hpo_stage2/best_config.yaml
+	poetry run python scripts/run_hpo_stage.py hpo=stage3_refit task=$(HPO_TASK) best_config=outputs/hpo_stage2/best_config.yaml
 
 #==============================================================================
 # Evaluation
