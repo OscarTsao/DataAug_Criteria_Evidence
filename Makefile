@@ -9,6 +9,7 @@
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
 .PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax build-ensemble build-ensemble-test monitor-hpo list-hpo-studies check-hpo-health
 .PHONY: compare-pruners compare-pruners-test show-pruner-budget show-pruner-recommendations
+.PHONY: compare-samplers compare-samplers-test show-sampler-recommendations
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -85,6 +86,11 @@ help:
 	@echo "  make compare-pruners-test      - Quick pruner comparison test (20 trials)"
 	@echo "  make show-pruner-budget        - Show resource budget estimation examples"
 	@echo "  make show-pruner-recommendations - Show pruner recommendations for common scenarios"
+	@echo ""
+	@echo "$(GREEN)SUPERMAX BOHB & Advanced Samplers (Phase 9):$(NC)"
+	@echo "  make compare-samplers          - Compare samplers on benchmark (100 trials)"
+	@echo "  make compare-samplers-test     - Quick sampler comparison test (50 trials)"
+	@echo "  make show-sampler-recommendations - Show sampler recommendations for common scenarios"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -519,6 +525,35 @@ show-pruner-recommendations:
 	@echo "$(BLUE)SUPERMAX Phase 8: Pruner Recommendations$(NC)"
 	@echo "$(BLUE)===========================================================$ $(NC)"
 	poetry run python scripts/compare_pruners.py --show-recommendation
+
+#==============================================================================
+# SUPERMAX Phase 9: BOHB & Advanced Samplers
+#==============================================================================
+
+## compare-samplers: Compare sampling strategies on benchmark (Phase 9)
+compare-samplers:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 9: Sampler Comparison$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/compare_samplers.py \
+		--benchmark $${SAMPLER_BENCHMARK:-sphere} \
+		--n-trials $${SAMPLER_N_TRIALS:-100} \
+		--output $${SAMPLER_OUTPUT:-outputs/sampler_comparison.json}
+	@echo "$(GREEN)✓ Sampler comparison complete!$(NC)"
+
+## compare-samplers-test: Quick sampler comparison test
+compare-samplers-test:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 9: Quick Sampler Test$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	SAMPLER_N_TRIALS=50 SAMPLER_OUTPUT=outputs/sampler_test.json $(MAKE) compare-samplers
+
+## show-sampler-recommendations: Show sampler recommendations
+show-sampler-recommendations:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 9: Sampler Recommendations$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/compare_samplers.py --show-recommendations
 
 #==============================================================================
 # Development
