@@ -7,7 +7,7 @@
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
-.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax build-ensemble build-ensemble-test
+.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax build-ensemble build-ensemble-test monitor-hpo list-hpo-studies check-hpo-health
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -73,6 +73,11 @@ help:
 	@echo "$(GREEN)SUPERMAX Ensemble Building (Phase 6):$(NC)"
 	@echo "  make build-ensemble AGENT=<agent> ENSEMBLE_INPUT=<path> ENSEMBLE_TYPE=<pareto|cv> - Build ensemble from results"
 	@echo "  make build-ensemble-test AGENT=<agent> ENSEMBLE_INPUT=<path> ENSEMBLE_TYPE=<type> - Test with simulated predictions"
+	@echo ""
+	@echo "$(GREEN)SUPERMAX Monitoring & Management (Phase 7):$(NC)"
+	@echo "  make list-hpo-studies HPO_STORAGE=<storage> - List all studies in database"
+	@echo "  make monitor-hpo HPO_STUDY_NAME=<study> HPO_STORAGE=<storage> - Monitor study in real-time"
+	@echo "  make check-hpo-health HPO_STUDY_NAME=<study> HPO_STORAGE=<storage> - Run health check"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -420,6 +425,56 @@ build-ensemble-test:
 	@echo "$(BLUE)SUPERMAX Phase 6: Ensemble Test (Simulated)$(NC)"
 	@echo "$(BLUE)===========================================================$ $(NC)"
 	ENSEMBLE_SIMULATE=1 ENSEMBLE_N_MODELS=2 $(MAKE) build-ensemble AGENT=$(AGENT) ENSEMBLE_INPUT=$(ENSEMBLE_INPUT) ENSEMBLE_TYPE=$(ENSEMBLE_TYPE)
+
+## monitor-hpo: Monitor running HPO study in real-time (Phase 7)
+monitor-hpo:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 7: HPO Monitoring$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$$HPO_STUDY_NAME" ]; then \
+		echo "$(RED)Error: HPO_STUDY_NAME not set$(NC)"; \
+		echo "$(YELLOW)Usage: make monitor-hpo HPO_STUDY_NAME=<study> HPO_STORAGE=<storage>$(NC)"; \
+		echo "$(YELLOW)Or: make list-hpo-studies HPO_STORAGE=<storage>$(NC)"; \
+		exit 1; \
+	fi
+	@if [ -z "$$HPO_STORAGE" ]; then \
+		echo "$(RED)Error: HPO_STORAGE not set$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/monitor_hpo.py \
+		--study-name $$HPO_STUDY_NAME \
+		--storage $$HPO_STORAGE \
+		--update-interval $${HPO_UPDATE_INTERVAL:-10} \
+		--checkpoint-dir $${HPO_CHECKPOINT_DIR:-outputs/supermax/checkpoints} \
+		--log-dir $${HPO_LOG_DIR:-outputs/supermax/logs}
+
+## list-hpo-studies: List all HPO studies in database
+list-hpo-studies:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX: List HPO Studies$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$$HPO_STORAGE" ]; then \
+		echo "$(RED)Error: HPO_STORAGE not set$(NC)"; \
+		echo "$(YELLOW)Usage: make list-hpo-studies HPO_STORAGE=<storage>$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/monitor_hpo.py \
+		--storage $$HPO_STORAGE \
+		--list-studies
+
+## check-hpo-health: Check health of HPO study
+check-hpo-health:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX: HPO Health Check$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$$HPO_STUDY_NAME" ] || [ -z "$$HPO_STORAGE" ]; then \
+		echo "$(RED)Error: HPO_STUDY_NAME and HPO_STORAGE required$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/monitor_hpo.py \
+		--study-name $$HPO_STUDY_NAME \
+		--storage $$HPO_STORAGE \
+		--check-health
 
 #==============================================================================
 # Development
