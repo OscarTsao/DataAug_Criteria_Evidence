@@ -1,6 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
+.PHONY: test-deployment
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -95,6 +96,9 @@ help:
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
 	@echo "  make export             - Export metrics from MLflow"
+	@echo ""
+	@echo "$(GREEN)Deployment (Phase 14):$(NC)"
+	@echo "  make test-deployment    - Test deployment functionality (registry, packaging, deployment)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -288,6 +292,26 @@ eval:
 export:
 	@echo "$(BLUE)Exporting metrics...$(NC)"
 	poetry run python -m psy_agents_noaug.cli export_metrics
+
+#==============================================================================
+# Deployment & Model Registry (Phase 14)
+#==============================================================================
+
+## test-deployment: Test deployment functionality
+test-deployment:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 14: Testing Deployment & Model Registry$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Model Registry (MLflow integration)"
+	@echo "  - Deployment Packager (self-contained packages)"
+	@echo "  - Model Deployer (deployment manifests)"
+	@echo "  - Production model utilities"
+	@echo ""
+	poetry run python scripts/test_deployment.py
+	@echo ""
+	@echo "$(GREEN)✓ Deployment tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
