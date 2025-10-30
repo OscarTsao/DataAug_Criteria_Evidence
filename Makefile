@@ -658,6 +658,48 @@ test-ensemble:
 	poetry run python scripts/test_ensemble.py
 
 #==============================================================================
+# SUPERMAX Phase 12: Distributed HPO & Parallel Execution
+#==============================================================================
+
+## test-distributed: Test distributed HPO functionality
+test-distributed:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 12: Testing Distributed HPO$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/test_distributed.py
+
+## run-distributed-hpo: Run distributed HPO with parallel execution
+## Usage: make run-distributed-hpo AGENT=criteria N_TRIALS=100 N_WORKERS=4 GPU_IDS="0,1,2,3"
+run-distributed-hpo:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 12: Distributed HPO$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "Agent: $(AGENT)"
+	@echo "Trials: $(N_TRIALS)"
+	@echo "Workers: $(N_WORKERS)"
+	@if [ -n "$(GPU_IDS)" ]; then \
+		echo "GPUs: $(GPU_IDS)"; \
+		poetry run python scripts/run_distributed_hpo.py \
+			--agent $(AGENT) \
+			--n-trials $(N_TRIALS) \
+			--n-workers $(N_WORKERS) \
+			--gpu-ids $(GPU_IDS); \
+	else \
+		echo "GPUs: CPU only"; \
+		poetry run python scripts/run_distributed_hpo.py \
+			--agent $(AGENT) \
+			--n-trials $(N_TRIALS) \
+			--n-workers $(N_WORKERS); \
+	fi
+
+## check-gpu-availability: Check available GPUs
+check-gpu-availability:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 12: GPU Availability Check$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@poetry run python -c "from psy_agents_noaug.hpo.distributed import check_gpu_availability; import json; info = check_gpu_availability(); print(json.dumps(info, indent=2))"
+
+#==============================================================================
 # Development
 #==============================================================================
 
