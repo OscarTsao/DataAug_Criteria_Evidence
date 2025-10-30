@@ -7,6 +7,7 @@
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
+.PHONY: stage-a stage-a-test stage-a-all
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -58,6 +59,11 @@ help:
 	@echo "  make tune-share-supermax     - Super-max HPO: share (3000 trials, 100 epochs)"
 	@echo "  make tune-joint-supermax     - Super-max HPO: joint (3000 trials, 100 epochs)"
 	@echo "  make tune-all-supermax       - Super-max HPO: ALL architectures sequentially (~19K trials)"
+	@echo ""
+	@echo "$(GREEN)SUPERMAX Multi-Stage HPO (Phase 5):$(NC)"
+	@echo "  make stage-a AGENT=<agent>   - Stage-A baseline exploration (default: 1000 trials, 6 epochs)"
+	@echo "  make stage-a-test AGENT=<agent> - Stage-A smoke test (20 trials, 2 epochs)"
+	@echo "  make stage-a-all             - Stage-A for all 4 agents (criteria, evidence, share, joint)"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -255,6 +261,47 @@ eval:
 export:
 	@echo "$(BLUE)Exporting metrics...$(NC)"
 	poetry run python -m psy_agents_noaug.cli export_metrics
+
+#==============================================================================
+# SUPERMAX Multi-Stage HPO (Stage-A/B/C)
+#==============================================================================
+
+## stage-a: SUPERMAX Stage-A baseline exploration (default: 1000 trials)
+stage-a:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-A: Baseline Exploration$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(YELLOW)Agent: $(AGENT)$(NC)"
+	@echo "$(YELLOW)Trials: $${STAGE_A_TRIALS:-1000}$(NC)"
+	@echo "$(YELLOW)Epochs: $${STAGE_A_EPOCHS:-6}$(NC)"
+	@echo "$(YELLOW)Top-K: $${STAGE_A_TOPK:-50}$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	poetry run python scripts/run_stage_a.py \
+		--agent $(AGENT) \
+		--trials $${STAGE_A_TRIALS:-1000} \
+		--epochs $${STAGE_A_EPOCHS:-6} \
+		--patience $${HPO_PATIENCE:-2} \
+		--max-samples $${HPO_MAX_SAMPLES:-512} \
+		--topk $${STAGE_A_TOPK:-50} \
+		--outdir outputs/supermax/stage_a/$(AGENT)
+
+## stage-a-test: SUPERMAX Stage-A smoke test (20 trials, 2 epochs)
+stage-a-test:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-A: Smoke Test (20 trials)$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	STAGE_A_TRIALS=20 STAGE_A_EPOCHS=2 $(MAKE) stage-a AGENT=$(AGENT)
+
+## stage-a-all: Run Stage-A for all 4 agents
+stage-a-all:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-A: ALL AGENTS$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	$(MAKE) stage-a AGENT=criteria
+	$(MAKE) stage-a AGENT=evidence
+	$(MAKE) stage-a AGENT=share
+	$(MAKE) stage-a AGENT=joint
+	@echo "$(GREEN)✓ Stage-A complete for all agents$(NC)"
 
 #==============================================================================
 # Development
