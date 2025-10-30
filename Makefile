@@ -6,6 +6,7 @@
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
+.PHONY: full-hpo-all maximal-hpo-all show-best-%
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -159,6 +160,17 @@ groundtruth:
 groundtruth-local:
 	@echo "$(BLUE)Generating ground truth from local CSV...$(NC)"
 	poetry run python -m psy_agents_noaug.cli make_groundtruth data=local_csv
+
+## prepare-tfidf: Pre-fit TF-IDF cache for augmentation (criteria)
+prepare-tfidf:
+	@echo "$(BLUE)Pre-fitting TF-IDF cache for augmentation (task=$(TASK))...$(NC)"
+	poetry run python scripts/prepare_tfidf_cache.py --task $(TASK)
+
+## prepare-tfidf-all: Pre-fit TF-IDF cache for all tasks
+prepare-tfidf-all:
+	@echo "$(BLUE)Pre-fitting TF-IDF cache for all tasks...$(NC)"
+	$(MAKE) prepare-tfidf TASK=criteria
+	$(MAKE) prepare-tfidf TASK=evidence
 
 #==============================================================================
 # Training
@@ -424,15 +436,25 @@ quick-start: setup groundtruth hpo-s0
 full-hpo: hpo-s0 hpo-s1 hpo-s2 refit
 	@echo "$(GREEN)✓ Full HPO pipeline complete!$(NC)"
 
-## full-hpo-all: Run complete HPO pipeline for ALL architectures sequentially
+## full-hpo-all: Run complete multi-stage HPO pipeline for selected architectures
 full-hpo-all:
-	@echo "$(BLUE)Running multi-stage HPO for all architectures...$(NC)"
-	poetry run python scripts/run_all_hpo.py --mode multistage
+	@agents="$(if $(strip $(AGENTS)),$(AGENTS),criteria evidence share joint)"; \
+	for agent in $$agents; do \
+		echo "$(BLUE)> Multi-stage HPO $$agent$(NC)"; \
+		poetry run psy-agents hpo-stage --agent $$agent --seeds "$(if $(strip $(HPO_SEEDS)),$(HPO_SEEDS),1)"; \
+	done
 
-## maximal-hpo-all: Run maximal HPO for ALL architectures sequentially
+## maximal-hpo-all: Run maximal single-stage HPO for selected architectures
 maximal-hpo-all:
-	@echo "$(BLUE)Running maximal HPO for all architectures...$(NC)"
-	poetry run python scripts/run_all_hpo.py --mode maximal
+	@agents="$(if $(strip $(AGENTS)),$(AGENTS),criteria evidence share joint)"; \
+	for agent in $$agents; do \
+		echo "$(BLUE)> Maximal HPO $$agent$(NC)"; \
+		poetry run psy-agents hpo-max --agent $$agent --seeds "$(if $(strip $(HPO_SEEDS)),$(HPO_SEEDS),1)" --trials $(if $(strip $(HPO_TRIALS)),$(HPO_TRIALS),100) --epochs $(if $(strip $(HPO_EPOCHS)),$(HPO_EPOCHS),6); \
+	done
+
+## show-best-%: Display top trials for the given agent
+show-best-%:
+	@poetry run psy-agents show-best --agent $* --study $(if $(strip $(HPO_PROFILE)),$(HPO_PROFILE),noaug)-$*-max --topk $(if $(strip $(TOPK)),$(TOPK),5)
 
 #==============================================================================
 # Info
