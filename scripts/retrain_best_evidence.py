@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sqlite3
 import time
@@ -60,6 +61,96 @@ def _decode_params(cur: sqlite3.Cursor, trial_id: int) -> dict[str, Any]:
         else:
             params[name] = val
     return params
+
+
+def _extract_methods(params: dict[str, Any]) -> list[str]:
+    methods: list[str] = []
+
+    raw_methods = params.get("aug.methods")
+    if isinstance(raw_methods, str):
+        methods.extend(m.strip() for m in raw_methods.split(";") if m.strip())
+    elif isinstance(raw_methods, (list, tuple)):
+        methods.extend(str(m) for m in raw_methods if m)
+
+    legacy_keys = (
+        "aug.nlpaug_method_1",
+        "aug.nlpaug_method_2",
+        "aug.nlpaug_method_3",
+        "aug.textattack_method_1",
+        "aug.textattack_method_2",
+    )
+    for key in legacy_keys:
+        value = params.get(key)
+        if value:
+            methods.append(str(value))
+
+    for key, value in params.items():
+        if key.startswith("aug.method[") and value:
+            name = key[len("aug.method[") : -1]
+            methods.append(str(name))
+        if key.startswith("aug.active[") and value:
+            name = key[len("aug.active[") : -1]
+            methods.append(str(name))
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for method in methods:
+        if method in seen or not method:
+            continue
+        seen.add(method)
+        unique.append(method)
+    return unique
+
+
+def _extract_method_weights(params: dict[str, Any]) -> dict[str, float] | None:
+    weights: dict[str, float] = {}
+    for key, value in params.items():
+        if key.startswith("aug.weight["):
+            name = key[len("aug.weight[") : -1]
+            try:
+                weights[name] = float(value)
+            except (TypeError, ValueError):
+                continue
+    logits: dict[str, float] = {}
+    for key, value in params.items():
+        if key.startswith("aug.logit["):
+            name = key[len("aug.logit[") : -1]
+            try:
+                logits[name] = float(value)
+            except (TypeError, ValueError):
+                continue
+    if logits:
+        max_logit = max(logits.values())
+        exp_vals = {name: math.exp(val - max_logit) for name, val in logits.items()}
+        total = sum(exp_vals.values()) or 1.0
+        for name, val in exp_vals.items():
+            weights[name] = val / total
+    return weights or None
+
+
+def _extract_method_kwargs(params: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    method_kwargs: dict[str, dict[str, Any]] = {}
+
+    if "aug.random_char.action" in params:
+        method_kwargs.setdefault("nlpaug/char/RandomCharAug", {})["action"] = params[
+            "aug.random_char.action"
+        ]
+
+    if "aug.random_word.action" in params:
+        method_kwargs.setdefault("nlpaug/word/RandomWordAug", {})["action"] = params[
+            "aug.random_word.action"
+        ]
+
+    if "aug.tfidf.action" in params:
+        method_kwargs.setdefault("nlpaug/word/TfIdfAug", {})["action"] = params[
+            "aug.tfidf.action"
+        ]
+    if "aug.tfidf.top_k" in params:
+        method_kwargs.setdefault("nlpaug/word/TfIdfAug", {})["top_k"] = params[
+            "aug.tfidf.top_k"
+        ]
+
+    return method_kwargs or None
 
 
 def _build_cfg_from_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -122,23 +213,16 @@ def _build_cfg_from_params(params: dict[str, Any]) -> dict[str, Any]:
         },
         "augmentation": {
             "enabled": bool(params.get("aug.enabled", False)),
-            "lib": params.get("aug.lib", "nlpaug"),
-            # GL: If individual method slots exist, collect them; otherwise default empty
-            "methods": [
-                m
-                for m in [
-                    params.get("aug.nlpaug_method_1"),
-                    params.get("aug.nlpaug_method_2"),
-                    params.get("aug.nlpaug_method_3"),
-                    params.get("aug.textattack_method_1"),
-                    params.get("aug.textattack_method_2"),
-                ]
-                if m
-            ],
+            "methods": _extract_methods(params),
             "p_apply": float(params.get("aug.p_apply", 0.15)),
             "ops_per_sample": int(params.get("aug.ops_per_sample", 1)),
-            "max_replace_ratio": float(params.get("aug.max_replace_ratio", 0.3)),
-            "scope": "train_only",
+            "max_replace": float(
+                params.get("aug.max_replace", params.get("aug.max_replace_ratio", 0.3))
+            ),
+            "method_weights": _extract_method_weights(params),
+            "method_kwargs": _extract_method_kwargs(params),
+            "tfidf_model_path": params.get("aug.tfidf_model_path"),
+            "reserved_map_path": params.get("aug.reserved_map_path"),
             "seed": int(params.get("seed", 42)),
         },
         "meta": {"seed": int(params.get("seed", 42))},

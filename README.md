@@ -13,13 +13,18 @@ pytest -q
 # train (stub; wire to your trainer as needed)
 psy-agents train --agent criteria --model-name bert-base-uncased --epochs 1 --outdir ./_runs
 
-# HPO (Stage A global sweep)
-HPO_EPOCHS=6 make tune-criteria-max
-HPO_EPOCHS=6 make tune-evidence-max
+# HPO (multi-stage evidence sweep)
+HPO_EPOCHS=6 make tune-criteria-max              # Stage-A (no-aug global)
+HPO_EPOCHS=6 make tune-evidence-max              # Stage-A (no-aug global)
+FROM_STUDY=noaug-evidence-max \\
+  make tune-evidence-aug                         # Stage-B (augmentation policy NSGA-II)
+FROM_STUDY=aug-evidence-ext \\
+  make tune-evidence-joint                       # Stage-C (joint refine, lr ±20%)
 
 # Show winners
 psy-agents show-best --agent criteria --study noaug-criteria-max --topk 5
-psy-agents show-best --agent evidence --study noaug-evidence-max --topk 5
+psy-agents show-best --agent evidence --study aug-evidence-ext --topk 5
+psy-agents show-best --agent evidence --study aug-evidence-joint --topk 5
 
 > Notes:
 > - MLflow logs to ./_runs/mlruns by default (file URI).
@@ -43,16 +48,18 @@ psy-agents show-best --agent evidence --study noaug-evidence-max --topk 5
 ### Quick Start with Augmentation
 
 ```bash
-# Enable augmentation (currently dormant by default)
-psy-agents train --agent criteria augmentation.enabled=true
+# Enable augmentation via CLI flags (evidence agent only by default)
+psy-agents train --agent evidence --aug-enabled --aug-methods all
 
-# Configure augmentation scope
-psy-agents train augmentation.scope=train_only  # Recommended
-psy-agents train augmentation.scope=all         # All splits
-psy-agents train augmentation.scope=none        # Disabled
+# Configure augmentation policy
+psy-agents train --aug-p-apply 0.2 --aug-ops-per-sample 2 --aug-max-replace 0.3
+psy-agents train --aug-methods "nlpaug/word/SynonymAug(wordnet),textattack/SwapAugmenter"
 
-# Set augmentation probability and operations
-psy-agents train augmentation.p_apply=0.15 augmentation.ops_per_sample=1
+# HPO Stage-B/Stage-C via CLI
+psy-agents tune --agent evidence --study aug-evidence-ext --stage B \
+  --from-study noaug-evidence-max --n-trials 400
+psy-agents tune --agent evidence --study aug-evidence-joint --stage C \
+  --from-study aug-evidence-ext --pareto-limit 5 --n-trials 160
 ```
 
 ### Transformation Roadmap
@@ -123,3 +130,19 @@ infrastructure, data pipeline details, and CLI/Makefile usage.
 
 Model implementations for the four supported architectures live in
 `src/psy_agents_noaug/architectures/` (`criteria`, `evidence`, `share`, `joint`).
+
+## Smoke Commands
+
+```bash
+# Stage-A: baseline search
+HPO_EPOCHS=6 make tune-evidence-max
+
+# Stage-B: reuse Stage-A best (set FROM_STUDY first)
+FROM_STUDY=noaug-evidence-max make tune-evidence-aug
+
+# Stage-C: refine around Pareto policies
+FROM_STUDY=aug-evidence-ext make tune-evidence-joint
+
+# Inspect best runs
+psy-agents show-best --agent evidence --study aug-evidence-joint --topk 3
+```

@@ -18,10 +18,11 @@ if TYPE_CHECKING:
 class TfidfResource:
     """Container holding a fitted TF-IDF vectorizer and its storage path."""
 
-    vectorizer: TfidfVectorizer
-    path: Path
+    vectorizer: TfidfVectorizer | None
+    path: Path  # Directory containing TF-IDF assets
     fitted: bool
     build_time_sec: float | None = None
+    vectorizer_path: Path | None = None
 
 
 def _prepare_texts(texts: Iterable[str]) -> list[str]:
@@ -57,14 +58,30 @@ def load_or_fit_tfidf(
         TfidfResource containing the fitted vectoriser and path.
     """
     start = time.time()
-    path = Path(model_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    target = Path(model_path)
+    if target.suffix:
+        base_dir = target.parent
+        vectorizer_file = target
+    else:
+        base_dir = target
+        vectorizer_file = base_dir / "tfidf.pkl"
 
-    if path.exists():
-        with path.open("rb") as handle:
-            vectorizer = joblib.load(handle)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    idf_file = base_dir / "tfidfaug_w2idf.txt"
+    tfidf_file = base_dir / "tfidfaug_w2tfidf.txt"
+
+    if idf_file.exists() and tfidf_file.exists():
+        vectorizer = None
+        if vectorizer_file.exists():
+            with vectorizer_file.open("rb") as handle:
+                vectorizer = joblib.load(handle)
         return TfidfResource(
-            vectorizer=vectorizer, path=path, fitted=False, build_time_sec=None
+            vectorizer=vectorizer,
+            path=base_dir,
+            fitted=False,
+            build_time_sec=None,
+            vectorizer_path=vectorizer_file,
         )
 
     texts = _prepare_texts(train_texts)
@@ -75,14 +92,29 @@ def load_or_fit_tfidf(
         ngram_range=ngram_range,
         sublinear_tf=True,
     )
-    vectorizer.fit(texts)
+    matrix = vectorizer.fit_transform(texts)
+    feature_names = vectorizer.get_feature_names_out()
+    idf_values = vectorizer.idf_
+    # Average TF-IDF score per token across documents
+    tfidf_scores = matrix.sum(axis=0).A1 / max(1, matrix.shape[0])
 
-    with path.open("wb") as handle:
+    with idf_file.open("w", encoding="utf-8") as handle:
+        for idx, token in enumerate(feature_names):
+            safe_token = str(token).replace(" ", "_")
+            handle.write(f"{safe_token} {idf_values[idx]}\n")
+
+    with tfidf_file.open("w", encoding="utf-8") as handle:
+        for idx, token in enumerate(feature_names):
+            safe_token = str(token).replace(" ", "_")
+            handle.write(f"{safe_token} {tfidf_scores[idx]}\n")
+
+    with vectorizer_file.open("wb") as handle:
         joblib.dump(vectorizer, handle)
 
     return TfidfResource(
         vectorizer=vectorizer,
-        path=path,
+        path=base_dir,
         fitted=True,
         build_time_sec=time.time() - start,
+        vectorizer_path=vectorizer_file,
     )

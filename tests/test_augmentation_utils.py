@@ -69,7 +69,7 @@ class TestResolveMethodsFunction:
 
     def test_resolve_methods_multiple_methods(self):
         """Test resolving multiple specific methods."""
-        methods = ["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug"]
+        methods = ["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug(wordnet)"]
         result = resolve_methods("nlpaug", methods)
         assert result == methods
 
@@ -78,11 +78,11 @@ class TestResolveMethodsFunction:
         methods = [
             "nlpaug/char/KeyboardAug",
             "nlpaug/char/KeyboardAug",
-            "nlpaug/word/SynonymAug",
+            "nlpaug/word/SynonymAug(wordnet)",
         ]
         result = resolve_methods("nlpaug", methods)
         assert len(result) == 2
-        assert result == ["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug"]
+        assert result == ["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug(wordnet)"]
 
     def test_resolve_methods_unknown_method_raises(self):
         """Test that unknown method raises KeyError."""
@@ -154,7 +154,7 @@ class TestBuildEvidenceAugmenterBasic:
         """Test building augmenter with multiple methods."""
         cfg = AugConfig(
             lib="nlpaug",
-            methods=["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug"],
+            methods=["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug(wordnet)"],
             p_apply=0.5,
             seed=42,
         )
@@ -163,7 +163,21 @@ class TestBuildEvidenceAugmenterBasic:
         assert result is not None
         assert len(result.methods) == 2
         assert "nlpaug/char/KeyboardAug" in result.methods
-        assert "nlpaug/word/SynonymAug" in result.methods
+        assert "nlpaug/word/SynonymAug(wordnet)" in result.methods
+
+    def test_build_augmenter_with_subset(self, sample_train_texts, temp_dir):
+        """Test building augmenter with method subset selection."""
+        cfg = AugConfig(
+            lib="nlpaug",
+            methods=["all"],
+            p_apply=0.5,
+            seed=123,
+            method_subset_size=3,
+        )
+        result = build_evidence_augmenter(cfg, sample_train_texts, tfidf_dir=temp_dir)
+
+        assert result is not None
+        assert len(result.methods) == 3
 
     def test_build_augmenter_textattack(self, sample_train_texts, temp_dir):
         """Test building augmenter with TextAttack methods."""
@@ -207,7 +221,9 @@ class TestBuildEvidenceAugmenterTfIdf:
 
         assert result is not None
         assert result.tfidf is not None
-        assert result.tfidf.path.exists()
+        assert result.tfidf.path.is_dir()
+        assert result.tfidf.vectorizer_path is not None
+        assert result.tfidf.vectorizer_path.exists()
         assert result.tfidf.fitted is True
         assert result.resources.tfidf_model_path == str(result.tfidf.path)
 
@@ -243,7 +259,8 @@ class TestBuildEvidenceAugmenterTfIdf:
         result = build_evidence_augmenter(cfg, sample_train_texts, tfidf_dir=temp_dir)
 
         assert result is not None
-        assert result.tfidf.path == model_path
+        assert result.tfidf.path == model_path.parent
+        assert result.tfidf.vectorizer_path == model_path
         assert model_path.exists()
 
     def test_build_augmenter_non_tfidf_no_tfidf_resource(
@@ -274,6 +291,22 @@ class TestBuildEvidenceAugmenterTfIdf:
         assert result is not None
         assert result.tfidf is not None
         assert len(result.methods) == 2
+        assert result.tfidf.vectorizer_path is not None
+
+    def test_build_augmenter_tfidf_top_k(self, sample_train_texts, temp_dir):
+        """Test that tfidf_top_k propagates to the augmenter."""
+        cfg = AugConfig(
+            lib="nlpaug",
+            methods=["nlpaug/word/TfIdfAug"],
+            p_apply=0.5,
+            seed=42,
+            tfidf_top_k=5,
+        )
+        result = build_evidence_augmenter(cfg, sample_train_texts, tfidf_dir=temp_dir)
+
+        assert result is not None
+        augmenter = result.pipeline._augmenters[0]
+        assert getattr(augmenter._augmenter, "top_k", None) == 5
 
 
 class TestBuildEvidenceAugmenterResources:
@@ -294,6 +327,7 @@ class TestBuildEvidenceAugmenterResources:
         assert result is not None
         assert result.resources is not None
         assert isinstance(result.resources, AugResources)
+        assert result.resources.tfidf_model_path == str(tfidf_path)
 
     def test_build_augmenter_preserves_config(self, sample_train_texts, temp_dir):
         """Test that config is preserved in result."""
@@ -312,6 +346,33 @@ class TestBuildEvidenceAugmenterResources:
         assert result.config.ops_per_sample == 2
         assert result.config.max_replace_ratio == 0.5
         assert result.config.seed == 123
+
+    def test_build_augmenter_antonym_guard_low_weight(
+        self, sample_train_texts, temp_dir
+    ):
+        """Antonym guard should reduce relative sampling weight."""
+        cfg = AugConfig(
+            lib="nlpaug",
+            methods=[
+                "nlpaug/word/AntonymAug(wordnet)",
+                "nlpaug/word/SynonymAug(wordnet)",
+            ],
+            p_apply=1.0,
+            seed=42,
+            antonym_guard="on_low_weight",
+        )
+        result = build_evidence_augmenter(cfg, sample_train_texts, tfidf_dir=temp_dir)
+
+        assert result is not None
+        assert result.pipeline.cfg.antonym_guard == "on_low_weight"
+        weights = dict(
+            zip(result.pipeline.methods, result.pipeline._weights, strict=False)
+        )
+        assert (
+            weights["nlpaug/word/AntonymAug(wordnet)"]
+            < weights["nlpaug/word/SynonymAug(wordnet)"]
+        )
+        assert weights["nlpaug/word/AntonymAug(wordnet)"] < 0.2
 
 
 class TestBuildEvidenceAugmenterEdgeCases:

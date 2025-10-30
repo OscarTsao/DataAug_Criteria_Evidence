@@ -5,9 +5,10 @@ from __future__ import annotations
 import math
 import os
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,7 @@ try:  # Optional dependency in slim environments
 except Exception:  # pragma: no cover - optional import
     Adafactor = None
 
+from ..training.optimizers import create_optimizer
 from .null_policy import apply_null_policy, temperature_scale
 from .utils import limit_dataframe, set_global_seed
 
@@ -60,7 +62,9 @@ def _extract_augmentation_config(params: dict[str, Any]) -> dict[str, Any] | Non
     }
 
     # Check for TF-IDF cache path
-    tfidf_cache = Path(f"data/augmentation_cache/tfidf/{params.get('agent', 'criteria')}")
+    tfidf_cache = Path(
+        f"data/augmentation_cache/tfidf/{params.get('agent', 'criteria')}"
+    )
     if tfidf_cache.exists():
         aug_config["tfidf_model"] = str(tfidf_cache)
 
@@ -127,9 +131,8 @@ def _load_dataframe(agent: str) -> pd.DataFrame:
     # dedicated datasets in the smoke-test flows.
     if agent in {"share", "joint"} and "DSM5_symptom" in df.columns:
         df = df.copy()
-        df["label"] = (
-            df["label"].astype(int)
-            | (df["DSM5_symptom"].astype("category").cat.codes % 2)
+        df["label"] = df["label"].astype(int) | (
+            df["DSM5_symptom"].astype("category").cat.codes % 2
         )
 
     return df[["sentence_text", "label"]]
@@ -141,24 +144,18 @@ def _build_optimizer(
     lr: float,
     weight_decay: float,
 ) -> torch.optim.Optimizer:
-    name = name.lower()
+    """Build optimizer using unified optimizer factory (SUPERMAX Phase 4).
+
+    Supports 6 optimizers: adamw, adam, adafactor, lion, lamb, adamw_8bit.
+    Factory handles missing dependencies gracefully with fallbacks.
+    """
     params = [p for p in model.parameters() if p.requires_grad]
-    if name == "adamw":
-        return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
-    if name == "adam":
-        return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
-    if name == "adafactor" and Adafactor is not None:
-        return Adafactor(
-            params,
-            lr=lr,
-            weight_decay=weight_decay,
-            scale_parameter=False,
-            relative_step=False,
-        )
-    if name == "lion":
-        # Lion requires an auxiliary dependency; approximate with AdamW in smoke pipelines.
-        return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
-    raise ValueError(f"Unsupported optimizer '{name}'")
+    return create_optimizer(
+        name=name,
+        model_parameters=params,
+        lr=lr,
+        weight_decay=weight_decay,
+    )
 
 
 def _build_scheduler(
@@ -260,9 +257,7 @@ def _train_single_seed(
         problem_type="single_label_classification",
     )
     grad_ckpt_enabled = bool(params.get("model.gradient_checkpointing"))
-    if grad_ckpt_enabled and hasattr(
-        model, "gradient_checkpointing_enable"
-    ):
+    if grad_ckpt_enabled and hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
     model.to(device)
 
@@ -282,7 +277,9 @@ def _train_single_seed(
         epochs,
     )
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=float(params["reg.label_smoothing"]))
+    criterion = nn.CrossEntropyLoss(
+        label_smoothing=float(params["reg.label_smoothing"])
+    )
     amp_enabled = bool(params.get("train.amp", True)) and torch.cuda.is_available()
     scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
     max_grad_norm = float(params["reg.max_grad_norm"])
@@ -409,7 +406,9 @@ def _train_single_seed(
         "logloss": float(logloss_value),
         "runtime_s": float(runtime),
     }
-    return EvaluationResult(metrics=metrics, probs=probs, labels=labels_np, runtime_s=runtime)
+    return EvaluationResult(
+        metrics=metrics, probs=probs, labels=labels_np, runtime_s=runtime
+    )
 
 
 def run_experiment(

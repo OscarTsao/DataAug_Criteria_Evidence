@@ -122,7 +122,8 @@ class SearchSpace:
         params["optim.name"] = trial.suggest_categorical(
             "optim.name",
             constraints.merged_choices(
-                "optim.name", ["adamw", "adam", "adafactor", "lion"]
+                "optim.name",
+                ["adamw", "adam", "adafactor", "lion", "lamb", "adamw_8bit"],
             ),
         )
 

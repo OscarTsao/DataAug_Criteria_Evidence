@@ -52,7 +52,12 @@ def _as_aug_config(config: AugConfig | dict[str, Any] | None) -> AugConfig | Non
     if "max_replace" not in cfg_dict and "max_replace_ratio" in cfg_dict:
         cfg_dict["max_replace"] = cfg_dict.pop("max_replace_ratio")
     if "enabled" not in cfg_dict:
-        cfg_dict["enabled"] = bool(cfg_dict.get("methods")) or cfg_dict.get("lib") not in (None, "none")
+        cfg_dict["enabled"] = bool(cfg_dict.get("methods")) or cfg_dict.get(
+            "lib"
+        ) not in (
+            None,
+            "none",
+        )
     return AugConfig(**cfg_dict)
 
 

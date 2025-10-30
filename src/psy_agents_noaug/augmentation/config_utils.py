@@ -1,145 +1,146 @@
-"""Utilities for converting HPO config dicts to AugConfig objects."""
+"""Utilities for converting augmentation sections into AugConfig objects."""
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .pipeline import AugConfig, AugLib
+from .pipeline import AugConfig
+from .registry import LEGACY_NAME_MAP
 
 LOGGER = logging.getLogger(__name__)
 
 
+def _coerce_methods(value: Sequence[str] | str | None) -> Sequence[str] | str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return LEGACY_NAME_MAP.get(value, value)
+    return [LEGACY_NAME_MAP.get(v, v) for v in value]
+
+
+def _coerce_method_weights(raw: Any) -> dict[str, float] | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            LOGGER.warning("Failed to parse aug.method_weights JSON string")
+            return None
+    if isinstance(raw, Mapping):
+        return {LEGACY_NAME_MAP.get(str(k), str(k)): float(v) for k, v in raw.items()}
+    if isinstance(raw, Sequence):
+        weights: dict[str, float] = {}
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            if "name" in item and "weight" in item:
+                name = LEGACY_NAME_MAP.get(str(item["name"]), str(item["name"]))
+                try:
+                    weights[name] = float(item["weight"])
+                except (TypeError, ValueError):
+                    continue
+        return weights or None
+    return None
+
+
 def hpo_config_to_aug_config(
-    config: dict[str, Any],
+    config: Mapping[str, Any],
     global_seed: int = 42,
 ) -> AugConfig | None:
-    """Convert HPO augmentation config dict to AugConfig object.
-
-    Args:
-        config: HPO configuration dictionary (may contain "augmentation" key)
-        global_seed: Global random seed (used if augmentation.seed is None)
-
-    Returns:
-        AugConfig object if augmentation is enabled, None otherwise
-
-    Examples:
-        >>> cfg = {
-        ...     "augmentation": {
-        ...         "enabled": True,
-        ...         "lib": "nlpaug",
-        ...         "methods": ["SynonymAug", "RandomWordAug"],
-        ...         "p_apply": 0.15,
-        ...         "ops_per_sample": 1,
-        ...         "max_replace_ratio": 0.3,
-        ...         "scope": "train_only",
-        ...         "seed": None,
-        ...     }
-        ... }
-        >>> aug_cfg = hpo_config_to_aug_config(cfg, global_seed=42)
-        >>> aug_cfg.lib
-        'nlpaug'
-        >>> aug_cfg.methods
-        ['SynonymAug', 'RandomWordAug']
-    """
-    # Check if augmentation config exists
     aug_dict = config.get("augmentation")
-    if not aug_dict:
-        LOGGER.debug("No 'augmentation' key in config, augmentation disabled")
+    if not isinstance(aug_dict, Mapping):
         return None
 
-    # Check if augmentation is enabled
-    if not aug_dict.get("enabled", False):
-        LOGGER.debug("Augmentation disabled (enabled=False)")
+    enabled = bool(aug_dict.get("enabled", False))
+    if not enabled:
         return None
 
-    # Extract augmentation parameters with defaults
-    lib = aug_dict.get("lib", "none")
-    if lib == "none":
-        LOGGER.debug("Augmentation lib is 'none', skipping")
-        return None
+    methods = aug_dict.get("methods")
+    if methods is None:
+        legacy_lib = aug_dict.get("lib")
+        if isinstance(legacy_lib, str) and legacy_lib.lower() != "none":
+            methods = legacy_lib
 
-    # Validate lib value
-    valid_libs: list[AugLib] = ["nlpaug", "textattack", "both"]
-    if lib not in valid_libs:
-        LOGGER.warning(f"Invalid augmentation lib '{lib}', must be one of {valid_libs}")
-        return None
-
-    # Extract methods - convert to list if needed
-    methods = aug_dict.get("methods", ["all"])
-    if isinstance(methods, str):
-        methods = [methods]
-
-    # Extract other parameters
     p_apply = float(aug_dict.get("p_apply", 0.15))
     ops_per_sample = int(aug_dict.get("ops_per_sample", 1))
-    max_replace_ratio = float(aug_dict.get("max_replace_ratio", 0.3))
-
-    # Seed handling: use augmentation.seed if provided, else global_seed
-    seed = aug_dict.get("seed")
-    if seed is None:
+    max_replace = float(
+        aug_dict.get("max_replace", aug_dict.get("max_replace_ratio", 0.3))
+    )
+    seed = aug_dict.get("seed", global_seed)
+    try:
+        seed = int(seed)
+    except (TypeError, ValueError):
         seed = global_seed
 
-    # Optional resource paths
     tfidf_model_path = aug_dict.get("tfidf_model_path")
     reserved_map_path = aug_dict.get("reserved_map_path")
+    allow_antonym = bool(aug_dict.get("allow_antonym", True))
 
-    # Method-specific kwargs (optional)
-    method_kwargs = aug_dict.get("method_kwargs", {})
+    method_kwargs = aug_dict.get("method_kwargs")
+    if isinstance(method_kwargs, str):
+        try:
+            method_kwargs = json.loads(method_kwargs)
+        except json.JSONDecodeError:
+            LOGGER.warning("Failed to parse aug.method_kwargs JSON string")
+            method_kwargs = None
 
-    # Build AugConfig
-    aug_config = AugConfig(
-        lib=lib,  # type: ignore[arg-type]
-        methods=methods,
+    method_weights = _coerce_method_weights(aug_dict.get("method_weights"))
+
+    antonym_guard = str(aug_dict.get("antonym_guard", "off")).lower()
+    subset_size = aug_dict.get("method_subset_size")
+    subset_seed = aug_dict.get("method_subset_seed")
+    tfidf_top_k = aug_dict.get("tfidf_top_k")
+
+    if subset_size is not None:
+        try:
+            subset_size = int(subset_size)
+        except (TypeError, ValueError):
+            subset_size = None
+
+    if subset_seed is not None:
+        try:
+            subset_seed = int(subset_seed)
+        except (TypeError, ValueError):
+            subset_seed = None
+
+    if tfidf_top_k is not None:
+        try:
+            tfidf_top_k = int(tfidf_top_k)
+        except (TypeError, ValueError):
+            tfidf_top_k = None
+
+    aug_cfg = AugConfig(
+        enabled=True,
+        methods=_coerce_methods(methods),
         p_apply=p_apply,
         ops_per_sample=ops_per_sample,
-        max_replace_ratio=max_replace_ratio,
+        max_replace=max_replace,
         tfidf_model_path=tfidf_model_path,
         reserved_map_path=reserved_map_path,
         seed=seed,
+        method_weights=method_weights,
         method_kwargs=method_kwargs,
+        example_limit=int(aug_dict.get("example_limit", 32)),
+        allow_antonym=allow_antonym,
+        antonym_guard=antonym_guard,
+        method_subset_size=subset_size,
+        method_subset_seed=subset_seed,
+        tfidf_top_k=tfidf_top_k,
     )
 
     LOGGER.info(
-        f"Augmentation enabled: lib={lib}, methods={methods}, "
-        f"p_apply={p_apply:.3f}, ops_per_sample={ops_per_sample}, "
-        f"max_replace_ratio={max_replace_ratio:.3f}, seed={seed}"
+        "Augmentation enabled: methods=%s p_apply=%.3f ops=%d max_replace=%.3f seed=%d",
+        aug_cfg.methods,
+        aug_cfg.p_apply,
+        aug_cfg.ops_per_sample,
+        aug_cfg.max_replace,
+        aug_cfg.seed,
     )
-
-    return aug_config
-
-
-def should_apply_augmentation(scope: str, is_training: bool) -> bool:
-    """Determine if augmentation should be applied based on scope and training mode.
-
-    Args:
-        scope: Augmentation scope ("train_only", "all", or "none")
-        is_training: Whether currently in training mode (True) or eval mode (False)
-
-    Returns:
-        True if augmentation should be applied, False otherwise
-
-    Examples:
-        >>> should_apply_augmentation("train_only", is_training=True)
-        True
-        >>> should_apply_augmentation("train_only", is_training=False)
-        False
-        >>> should_apply_augmentation("all", is_training=False)
-        True
-    """
-    if scope == "none":
-        return False
-    if scope == "train_only":
-        return is_training
-    if scope == "all":
-        return True
-
-    # Default to train_only for unknown scopes
-    LOGGER.warning(f"Unknown augmentation scope '{scope}', defaulting to 'train_only'")
-    return is_training
+    return aug_cfg
 
 
-__all__ = [
-    "hpo_config_to_aug_config",
-    "should_apply_augmentation",
-]
+__all__ = ["hpo_config_to_aug_config"]

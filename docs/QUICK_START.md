@@ -59,19 +59,35 @@ make hpo-sanity TASK=evidence MODEL=bert_base
 
 This runs 3 quick trials to verify the pipeline works.
 
-## Step 4: Run Full HPO Pipeline (Hours)
+## Step 4: Run Multi-stage or Maximal HPO (Hours)
 
-Now run the full hyperparameter optimization:
+Two turnkey targets orchestrate the new Optuna/MLflow pipelines:
 
 ```bash
-# Stage 1: Coarse search (20 trials)
-make hpo-coarse TASK=criteria MODEL=bert_base
+# Multi-stage pipeline (S0→S1→S2→Refit) for all agents
+make full-hpo-all
 
-# Stage 2: Fine search (30 trials)
-make hpo-fine TASK=criteria MODEL=bert_base
+# Maximal single-stage search for all agents
+make maximal-hpo-all
+```
 
-# Stage 3: Refit with best parameters
-make hpo-refit TASK=criteria MODEL=bert_base
+Both targets honour the environment knobs documented in the Makefile. The most
+useful overrides are:
+
+| Variable            | Purpose                              | Default |
+| ------------------- | ------------------------------------ | ------- |
+| `HPO_TRIALS_S0`     | Stage‑0 trial budget                 | `64`    |
+| `HPO_TRIALS_S1`     | Stage‑1 trial budget                 | `32`    |
+| `HPO_TRIALS_S2`     | Stage‑2 trial budget                 | `16`    |
+| `HPO_TRIALS`        | Maximal mode trial budget            | `100`   |
+| `HPO_EPOCHS`        | Training epochs per trial            | `6`     |
+| `HPO_SEEDS`         | Comma separated list of seeds        | `1`     |
+| `AGENTS`            | Override agents list (space separated)| all four |
+
+Example – run a quick smoke sweep on criteria only:
+
+```bash
+HPO_TRIALS_S0=8 HPO_TRIALS_S1=6 HPO_TRIALS_S2=4 AGENTS="criteria" make full-hpo-all
 ```
 
 ## Step 5: Train Best Model (1-2 hours)
@@ -91,6 +107,9 @@ make export-metrics EXPERIMENT=noaug_baseline OUTPUT=./results.csv
 # Or view in MLflow UI (metadata in mlflow.db, artifacts in ./mlruns)
 mlflow ui --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns
 # Then open http://localhost:5000 in your browser
+
+# Inspect Top-K trials directly from Optuna
+poetry run psy-agents show-best --agent criteria --study noaug-criteria-max --topk 5
 ```
 
 ### On-the-fly Augmentation (Evidence)

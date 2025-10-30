@@ -35,6 +35,9 @@ from .pipeline import (  # noqa: E402  (import after nltk setup)
 )
 from .registry import (  # noqa: E402
     ALL_METHODS,
+    ALLOWED_METHODS,
+    AUGMENTATION_BANLIST,
+    LEGACY_NAME_MAP,
     NLPAUG_METHODS,
     REGISTRY,
     TEXTATTACK_METHODS,
@@ -48,9 +51,12 @@ __all__ = [
     "is_enabled",
     "worker_init",
     "ALL_METHODS",
+    "ALLOWED_METHODS",
+    "AUGMENTATION_BANLIST",
     "NLPAUG_METHODS",
     "TEXTATTACK_METHODS",
     "REGISTRY",
+    "LEGACY_NAME_MAP",
     "load_or_fit_tfidf",
     "TfidfResource",
 ]

@@ -86,11 +86,14 @@ def benchmark_dataloader(
     augmenter = None
     if with_augmentation:
         aug_config = AugConfig(
-            lib="nlpaug",
-            methods=["nlpaug/word/SynonymAug", "nlpaug/word/RandomWordAug"],
+            enabled=True,
+            methods=[
+                "nlpaug/word/SynonymAug(wordnet)",
+                "nlpaug/word/RandomWordAug",
+            ],
             p_apply=0.5,
             ops_per_sample=1,
-            max_replace_ratio=0.3,
+            max_replace=0.3,
             seed=42,
         )
         augmenter = AugmenterPipeline(aug_config)

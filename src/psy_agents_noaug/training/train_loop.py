@@ -1,6 +1,7 @@
 """Comprehensive training loop with MLflow, AMP, and early stopping."""
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,9 @@ from tqdm import tqdm
 
 if TYPE_CHECKING:  # pragma: no cover
     from psy_agents_noaug.augmentation import AugmenterPipeline
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Trainer:
@@ -212,6 +216,16 @@ class Trainer:
                     perf_ratio = 0.0
                     if step_time_ema is not None and step_time_ema > 0:
                         perf_ratio = float(data_time_ema or 0.0) / step_time_ema
+                        if perf_ratio > 0.40:
+                            LOGGER.warning(
+                                "Data/step ratio %.3f exceeds 0.40 threshold; consider tuning augmentation or dataloader.",
+                                perf_ratio,
+                            )
+                            mlflow.log_metric(
+                                "perf.data_to_step_ratio_alert",
+                                1.0,
+                                step=self.global_step,
+                            )
                     mlflow.log_metrics(
                         {
                             "train_loss_step": loss.item()
@@ -253,6 +267,7 @@ class Trainer:
             "perf.data_time_ms_ema": (data_time_ema or 0.0) * 1000.0,
             "perf.step_time_ms_ema": (step_time_ema or 0.0) * 1000.0,
             "perf.data_to_step_ratio": perf_ratio_epoch,
+            "perf.data_to_step_ratio_alert": float(perf_ratio_epoch > 0.40),
         }
 
     @staticmethod
@@ -328,9 +343,6 @@ class Trainer:
                 return cfg_obj.get(field, default)
             return getattr(cfg_obj, field, default)
 
-        lib = _get("lib", "none")
-        enabled = has_pipeline and lib != "none"
-
         if has_pipeline and self.augmenter_pipeline is not None:
             methods = sorted(self.augmenter_pipeline.methods)
         else:
@@ -339,16 +351,25 @@ class Trainer:
                 raw_methods = [raw_methods]
             methods = sorted(str(m) for m in raw_methods)
 
+        enabled_flag = bool(self.augmenter_pipeline) or bool(_get("enabled", False))
+        max_replace = float(_get("max_replace", _get("max_replace_ratio", 0.0)))
+        method_weights = _get("method_weights", {}) or {}
         params: dict[str, Any] = {
-            "aug.enabled": bool(enabled),
-            "aug.lib": lib,
+            "aug.enabled": bool(enabled_flag),
             "aug.methods": ";".join(methods) if methods else "",
             "aug.p_apply": float(_get("p_apply", 0.0)),
             "aug.ops_per_sample": int(_get("ops_per_sample", 1)),
-            "aug.max_replace_ratio": float(_get("max_replace_ratio", 0.0)),
+            "aug.max_replace": max_replace,
             "aug.tfidf_model_path": _get("tfidf_model_path"),
             "aug.reserved_map_path": _get("reserved_map_path"),
         }
+
+        if method_weights:
+            params["aug.method_weights"] = json.dumps(
+                {str(k): float(v) for k, v in method_weights.items()},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
 
         method_kwargs = _get("method_kwargs", {})
         if method_kwargs:

@@ -167,7 +167,7 @@ class TestAugmentationPerformance:
 
         config = AugConfig(
             lib="nlpaug",
-            methods=["nlpaug/word/SynonymAug"],
+            methods=["nlpaug/word/SynonymAug(wordnet)"],
             p_apply=1.0,
             ops_per_sample=1,
             seed=42,

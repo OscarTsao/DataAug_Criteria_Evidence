@@ -11,10 +11,10 @@ from psy_agents_noaug.augmentation.pipeline import (
     _clamp,
     _merge_kwargs,
     _ratio_kwargs,
-    _resolve_methods,
     is_enabled,
     worker_init,
 )
+from psy_agents_noaug.data.augmentation_utils import resolve_methods
 
 
 class TestHelperFunctions:
@@ -36,7 +36,7 @@ class TestHelperFunctions:
         assert _ratio_kwargs("nlpaug/char/KeyboardAug", 0.3) == {"aug_char_p": 0.3}
 
     def test_ratio_kwargs_word(self):
-        assert _ratio_kwargs("nlpaug/word/SynonymAug", 0.3) == {"aug_p": 0.3}
+        assert _ratio_kwargs("nlpaug/word/SynonymAug(wordnet)", 0.3) == {"aug_p": 0.3}
 
     def test_ratio_kwargs_textattack(self):
         result = _ratio_kwargs("textattack/CharSwapAugmenter", 0.3)
@@ -47,15 +47,15 @@ class TestResolveMethodsInternal:
     """Test internal _resolve_methods function."""
 
     def test_resolve_none(self):
-        assert _resolve_methods("none", ["all"]) == []
+        assert resolve_methods("none", ["all"]) == []
 
     def test_resolve_nlpaug_all(self):
-        result = _resolve_methods("nlpaug", ["all"])
+        result = resolve_methods("nlpaug", ["all"])
         assert len(result) >= 10
 
     def test_resolve_unknown_raises(self):
         with pytest.raises(KeyError):
-            _resolve_methods("nlpaug", ["unknown"])
+            resolve_methods("nlpaug", ["unknown"])
 
 
 class TestIsEnabled:
@@ -69,7 +69,7 @@ class TestIsEnabled:
         assert is_enabled(cfg)
 
     def test_is_enabled_empty_methods(self):
-        assert not is_enabled(AugConfig(lib="nlpaug", methods=[]))
+        assert is_enabled(AugConfig(lib="nlpaug", methods=[]))
 
 
 class TestWorkerInit:

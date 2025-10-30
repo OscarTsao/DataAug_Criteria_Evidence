@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .registry import (
     ALL_METHODS,
+    LEGACY_NAME_MAP,
     NLPAUG_METHODS,
     REGISTRY,
     TEXTATTACK_METHODS,
@@ -21,77 +25,47 @@ from .registry import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping
 
 LOGGER = logging.getLogger(__name__)
 
-AugLib = Literal["none", "nlpaug", "textattack", "both"]
-
-
-@dataclass
-class AugConfig:
-    """Run-time augmentation configuration."""
-
-    lib: AugLib = "none"
-    methods: Sequence[str] = field(default_factory=lambda: ["all"])
-    p_apply: float = 0.15
-    ops_per_sample: int = 1
-    max_replace_ratio: float = 0.3
-    tfidf_model_path: str | None = None
-    reserved_map_path: str | None = None
-    seed: int = 42
-    method_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    example_limit: int = 32
-
-
-@dataclass
-class AugResources:
-    """External resources required by certain augmenters."""
-
-    tfidf_model_path: str | None = None
-    reserved_map_path: str | None = None
-
 
 def _clamp(value: float, low: float, high: float) -> float:
-    """Clamp numeric value to ``[low, high]`` inclusive."""
     return max(low, min(high, value))
 
 
-def _resolve_methods(lib: AugLib, methods: Sequence[str]) -> list[str]:
-    """Resolve effective augmentation methods given the selected libraries.
-
-    Supports the special value ``"all"`` which expands to all methods available
-    under the chosen library group.
-    """
-    if lib == "none":
+def _ensure_sequence(methods: Sequence[str] | str | None) -> list[str]:
+    if methods is None:
         return []
+    if isinstance(methods, str):
+        return [methods]
+    return list(methods)
 
-    lib_to_methods = {
-        "nlpaug": NLPAUG_METHODS,
-        "textattack": TEXTATTACK_METHODS,
-        "both": ALL_METHODS,
-    }
-    allowed = lib_to_methods.get(lib, [])
+
+def _resolve_methods(methods: Sequence[str] | str | None) -> list[str]:
+    declared = [m.strip() for m in _ensure_sequence(methods) if str(m).strip()]
+    if not declared:
+        declared = ["all"]
 
     resolved: list[str] = []
-    if isinstance(methods, list | tuple):
-        declared: list[str] = list(methods)
-    else:
-        declared = [methods]  # type: ignore[list-item]
     for method in declared:
-        if method == "all":
-            resolved.extend(allowed)
+        lowered = method.lower()
+        if lowered in {"all"}:
+            resolved.extend(ALL_METHODS)
             continue
-        if method not in REGISTRY:
+        if lowered in {"nlpaug", "nlpaug/all"}:
+            resolved.extend(NLPAUG_METHODS)
+            continue
+        if lowered in {"textattack", "textattack/all"}:
+            resolved.extend(TEXTATTACK_METHODS)
+            continue
+        mapped = LEGACY_NAME_MAP.get(method, method)
+        if mapped not in REGISTRY:
             raise KeyError(f"Unknown augmentation method: {method}")
-        if lib != "both" and method not in allowed:
-            LOGGER.debug("Skipping method %s not in lib %s", method, lib)
-            continue
-        resolved.append(method)
+        resolved.append(mapped)
 
-    # Preserve order while removing duplicates
-    seen: set[str] = set()
     unique: list[str] = []
+    seen: set[str] = set()
     for method in resolved:
         if method in seen:
             continue
@@ -101,17 +75,11 @@ def _resolve_methods(lib: AugLib, methods: Sequence[str]) -> list[str]:
 
 
 def _ratio_kwargs(name: str, ratio: float) -> dict[str, Any]:
-    """Return default intensity controls per method.
-
-    Different backends expose different parameter names; this helper maps a
-    unified ``max_replace_ratio`` to the appropriate argument.
-    """
     ratio = _clamp(ratio, 0.0, 1.0)
     if name.startswith("nlpaug/char/"):
         return {"aug_char_p": ratio}
     if name.startswith("nlpaug/word/"):
         return {"aug_p": ratio}
-
     mapping = {
         "textattack/CharSwapAugmenter": "pct_characters_to_swap",
         "textattack/DeletionAugmenter": "pct_words_to_delete",
@@ -126,76 +94,129 @@ def _ratio_kwargs(name: str, ratio: float) -> dict[str, Any]:
 
 
 def _merge_kwargs(
-    base: dict[str, Any], override: dict[str, Any] | None
+    base: dict[str, Any], override: Mapping[str, Any] | None
 ) -> dict[str, Any]:
-    """Shallow-merge dictionaries with ``override`` taking precedence."""
     merged = dict(base)
     if override:
         merged.update(override)
     return merged
 
 
-def _builder_kwargs(
-    name: str,
-    cfg: AugConfig,
-    resources: AugResources | None,
-) -> dict[str, Any]:
-    # Combine global “ratio” intensity with any per-method overrides
-    overrides = cfg.method_kwargs.get(name, {})
-    ratio_kwargs = _ratio_kwargs(name, cfg.max_replace_ratio)
-    kwargs = _merge_kwargs(ratio_kwargs, overrides)
+@dataclass
+class AugConfig:
+    lib: str | None = None
+    enabled: bool = False
+    methods: Sequence[str] | str = field(default_factory=lambda: ("all",))
+    p_apply: float = 0.15
+    ops_per_sample: int = 1
+    max_replace: float = 0.30
+    max_replace_ratio: float | None = None
+    tfidf_model_path: str | None = None
+    reserved_map_path: str | None = None
+    seed: int = 42
+    method_weights: dict[str, float] | None = None
+    method_kwargs: dict[str, dict[str, Any]] | None = None
+    example_limit: int = 32
+    allow_antonym: bool = True
+    antonym_guard: str = "off"
+    method_subset_size: int | None = None
+    method_subset_seed: int | None = None
+    tfidf_top_k: int | None = None
 
-    if name == "nlpaug/char/RandomCharAug" and "action" not in kwargs:
-        kwargs["action"] = "substitute"
-    if name == "nlpaug/word/RandomWordAug" and "action" not in kwargs:
-        kwargs["action"] = "swap"
+    def __post_init__(self) -> None:
+        methods_seq = _ensure_sequence(self.methods)
 
-    if name == "nlpaug/word/TfIdfAug":
-        path = kwargs.get("model_path") or cfg.tfidf_model_path
-        if resources and not path:
-            path = resources.tfidf_model_path
-        if path is None:
-            raise ValueError("TfIdfAug requires a fitted model_path")
-        kwargs["model_path"] = path
-        kwargs.setdefault("action", "substitute")
-        kwargs.setdefault("device", "cpu")
+        lib_lower = (self.lib or "").lower()
+        if not methods_seq:
+            if lib_lower in {"nlpaug", "textattack"}:
+                methods_seq = [f"{lib_lower}/all"]
+            else:
+                methods_seq = ["all"]
 
-    if name == "nlpaug/word/ReservedAug":
-        path = kwargs.get("reserved_map_path") or cfg.reserved_map_path
-        if resources and not path:
-            path = resources.reserved_map_path
-        if path is None:
-            raise ValueError("ReservedAug requires reserved_map_path")
-        kwargs["reserved_map_path"] = path
-        kwargs.setdefault("action", "substitute")
+        if not self.enabled and lib_lower not in {"", "none"}:
+            self.enabled = True
+        if not self.enabled and methods_seq != ["all"]:
+            self.enabled = True
 
-    return kwargs
+        mapped_methods = tuple(LEGACY_NAME_MAP.get(m, m) for m in methods_seq)
+        object.__setattr__(self, "methods", mapped_methods)
+
+        object.__setattr__(
+            self, "ops_per_sample", max(1, min(3, int(self.ops_per_sample)))
+        )
+        object.__setattr__(self, "p_apply", float(self.p_apply))
+        max_replace = self.max_replace
+        if self.max_replace_ratio is not None:
+            max_replace = float(self.max_replace_ratio)
+        object.__setattr__(self, "max_replace", float(max_replace))
+        object.__setattr__(self, "max_replace_ratio", float(max_replace))
+
+        weights = {
+            LEGACY_NAME_MAP.get(str(k), str(k)): float(v)
+            for k, v in (self.method_weights or {}).items()
+        }
+        object.__setattr__(self, "method_weights", weights)
+
+        kwargs = {
+            LEGACY_NAME_MAP.get(str(k), str(k)): dict(v)
+            for k, v in (self.method_kwargs or {}).items()
+        }
+        object.__setattr__(self, "method_kwargs", kwargs)
+
+        object.__setattr__(self, "allow_antonym", bool(self.allow_antonym))
+
+        guard = (self.antonym_guard or "off").lower()
+        if not self.allow_antonym and guard == "off":
+            guard = "on_low_weight"
+        if guard not in {"off", "on_low_weight"}:
+            raise ValueError("antonym_guard must be 'off' or 'on_low_weight'")
+        object.__setattr__(self, "antonym_guard", guard)
+
+        subset_size = self.method_subset_size
+        if subset_size is not None:
+            subset_size = max(1, int(subset_size))
+        object.__setattr__(self, "method_subset_size", subset_size)
+
+        if self.tfidf_top_k is not None:
+            object.__setattr__(self, "tfidf_top_k", max(1, int(self.tfidf_top_k)))
+
+
+@dataclass
+class AugResources:
+    tfidf_model_path: str | None = None
+    reserved_map_path: str | None = None
 
 
 class AugmenterPipeline:
-    """Deterministic augmentation pipeline for evidence text.
+    """Deterministic augmentation pipeline for evidence text."""
 
-    Note: Workers inherit identical RNG states after fork. Re-seed in worker_init.
-    """
+    def __init__(self, cfg: AugConfig, resources: AugResources | None = None) -> None:
+        if not cfg.enabled:
+            raise ValueError("Cannot instantiate AugmenterPipeline when enabled=False")
 
-    def __init__(
-        self,
-        cfg: AugConfig,
-        resources: AugResources | None = None,
-    ) -> None:
-        if cfg.lib == "none":
-            raise ValueError("Cannot instantiate AugmenterPipeline with lib='none'")
+        methods = _resolve_methods(cfg.methods)
+        if cfg.method_subset_size and cfg.method_subset_size < len(methods):
+            subset_rng = random.Random(
+                cfg.method_subset_seed
+                if cfg.method_subset_seed is not None
+                else cfg.seed
+            )
+            methods = subset_rng.sample(methods, cfg.method_subset_size)
+        if not methods:
+            raise ValueError("AugmenterPipeline requires at least one method")
 
         self.cfg = cfg
+        self.methods = tuple(methods)
         self.resources = resources or AugResources()
-        self.methods = _resolve_methods(cfg.lib, cfg.methods)
         self.p_apply = _clamp(cfg.p_apply, 0.0, 1.0)
-        self.ops_per_sample = max(1, min(2, int(cfg.ops_per_sample)))
-        self.max_replace_ratio = _clamp(cfg.max_replace_ratio, 0.0, 1.0)
-        # Global RNG not thread-safe; use instance RNG and re-seed in workers
-        self._rng = random.Random(cfg.seed)  # Instance-specific RNG (thread-safe)
+        self.ops_per_sample = max(1, min(3, int(cfg.ops_per_sample)))
+        self.max_replace = _clamp(cfg.max_replace, 0.0, 1.0)
+        self.example_limit = max(0, int(cfg.example_limit))
 
-        self._augmenters: list[tuple[str, AugmenterWrapper]] = []
+        self._rng = random.Random(cfg.seed)
+        self._augmenters: list[AugmenterWrapper] = []
+        self._weights: list[float] = []
+
         for name in self.methods:
             entry: RegistryEntry = REGISTRY[name]
             kwargs = _builder_kwargs(name, cfg, self.resources)
@@ -203,7 +224,7 @@ class AugmenterPipeline:
                 wrapper = entry.factory(**kwargs)
             except TypeError as exc:
                 LOGGER.debug(
-                    "Retrying augmenter %s without ratio kwargs due to %s", name, exc
+                    "Retrying augmenter %s without ratio kwargs: %s", name, exc
                 )
                 clean_kwargs = {
                     k: v
@@ -211,45 +232,45 @@ class AugmenterPipeline:
                     if k not in {"aug_p", "aug_char_p"} and not k.startswith("pct_")
                 }
                 wrapper = entry.factory(**clean_kwargs)
-            self._augmenters.append((name, wrapper))
+            self._augmenters.append(wrapper)
+            weight = cfg.method_weights.get(name, 0.0) if cfg.method_weights else 0.0
+            if (
+                not cfg.method_weights
+                and cfg.antonym_guard == "on_low_weight"
+                and "AntonymAug" in name
+            ):
+                weight = -4.0
+            self._weights.append(float(weight))
+
+        if self._weights and any(w != 0.0 for w in self._weights):
+            max_logit = max(self._weights)
+            exp_vals = [math.exp(w - max_logit) for w in self._weights]
+            total = sum(exp_vals) or 1.0
+            self._weights = [val / total for val in exp_vals]
+        else:
+            count = len(self._augmenters)
+            self._weights = [1.0 / count] * count
 
         self.method_counts: Counter[str] = Counter()
         self.applied_count = 0
         self.skipped_count = 0
         self.total_count = 0
         self.examples: list[dict[str, Any]] = []
-        self.example_limit = max(0, int(cfg.example_limit))
+
+    def set_seed(self, seed: int) -> None:
+        self._rng.seed(int(seed))
 
     def close(self) -> None:
-        """Release augmenter resources (WordNet, spaCy models, etc.)."""
         if hasattr(self, "_augmenters"):
-            # Clear augmenter references to allow garbage collection
-            del self._augmenters
+            self._augmenters.clear()
 
     def __enter__(self) -> AugmenterPipeline:
-        """Context manager entry."""
         return self
 
     def __exit__(self, *args: Any) -> None:
-        """Context manager exit with resource cleanup."""
         self.close()
 
-    def set_seed(self, seed: int) -> None:
-        """
-        Reset RNG state for deterministic worker behaviour.
-
-        Note: This resets the instance RNG. In multiprocessing environments,
-        workers inherit parent RNG state after fork and must call worker_init().
-        """
-        self._rng.seed(seed)
-
     def __call__(self, text: str) -> str:
-        """Apply augmentation and record usage statistics.
-
-        The pipeline may sample several operations per sample. If no operation
-        changes the text (e.g., due to edge cases), we count it as skipped to
-        keep analytics meaningful.
-        """
         self.total_count += 1
         if not self._augmenters or self.p_apply <= 0.0:
             self.skipped_count += 1
@@ -259,17 +280,18 @@ class AugmenterPipeline:
             self.skipped_count += 1
             return text
 
-        original = text
-        applied_methods: list[str] = []
         augmented = text
+        applied_methods: list[str] = []
 
         for _ in range(self.ops_per_sample):
-            method_name, augmenter = self._rng.choice(self._augmenters)
-            candidate = augmenter.augment_one(augmented)
-            if not isinstance(candidate, str) or not candidate:
-                continue
-            augmented = candidate
-            applied_methods.append(method_name)
+            idx = self._rng.choices(
+                range(len(self._augmenters)), weights=self._weights, k=1
+            )[0]
+            method_name = self.methods[idx]
+            candidate = self._augmenters[idx].augment_one(augmented)
+            if isinstance(candidate, str) and candidate:
+                augmented = candidate
+                applied_methods.append(method_name)
 
         if not applied_methods:
             self.skipped_count += 1
@@ -282,7 +304,7 @@ class AugmenterPipeline:
         if len(self.examples) < self.example_limit:
             self.examples.append(
                 {
-                    "original": original,
+                    "original": text,
                     "augmented": augmented,
                     "methods": applied_methods,
                     "timestamp": time.time(),
@@ -292,7 +314,6 @@ class AugmenterPipeline:
         return augmented
 
     def stats(self) -> dict[str, Any]:
-        """Return snapshot of usage statistics."""
         return {
             "total": self.total_count,
             "applied": self.applied_count,
@@ -301,41 +322,60 @@ class AugmenterPipeline:
         }
 
     def drain_examples(self) -> list[dict[str, Any]]:
-        """Return and clear collected augmentation examples."""
         data = list(self.examples)
         self.examples.clear()
         return data
 
 
+def _builder_kwargs(
+    name: str, cfg: AugConfig, resources: AugResources
+) -> dict[str, Any]:
+    overrides = cfg.method_kwargs.get(name, {}) if cfg.method_kwargs else {}
+    ratio_kwargs = _ratio_kwargs(name, cfg.max_replace)
+    kwargs = _merge_kwargs(ratio_kwargs, overrides)
+
+    if name == "nlpaug/char/RandomCharAug":
+        kwargs.setdefault("action", "substitute")
+    if name == "nlpaug/word/RandomWordAug":
+        kwargs.setdefault("action", "swap")
+
+    if name == "nlpaug/word/TfIdfAug":
+        model_path = (
+            kwargs.get("model_path")
+            or cfg.tfidf_model_path
+            or resources.tfidf_model_path
+        )
+        if model_path is None:
+            raise ValueError("TfIdfAug requires tfidf_model_path")
+        model_dir = Path(model_path)
+        if model_dir.suffix:
+            model_dir = model_dir.parent
+        kwargs["model_path"] = str(model_dir)
+        kwargs.setdefault("action", "substitute")
+        if cfg.tfidf_top_k:
+            kwargs.setdefault("top_k", int(cfg.tfidf_top_k))
+
+    if name == "nlpaug/word/ReservedAug":
+        reserved_path = (
+            kwargs.get("reserved_map_path")
+            or cfg.reserved_map_path
+            or resources.reserved_map_path
+        )
+        if reserved_path is None:
+            raise ValueError("ReservedAug requires reserved_map_path")
+        kwargs["reserved_map_path"] = reserved_path
+        kwargs.setdefault("action", "substitute")
+
+    return kwargs
+
+
 def worker_init(
     worker_id: int, base_seed: int, rank: int = 0, num_workers_per_rank: int = 1
 ) -> int:
-    """
-    Initialize random seeds for DataLoader workers with DDP support.
-
-    In multi-GPU setups (DDP), workers across different ranks must have unique seeds
-    to avoid duplicate augmentations. Seed derivation accounts for:
-    - rank: GPU/process ID in distributed training
-    - num_workers_per_rank: Number of DataLoader workers per GPU
-    - worker_id: Worker ID within current rank (0-indexed)
-
-    Args:
-        worker_id: Worker ID within current DataLoader (0, 1, 2, ...)
-        base_seed: Global base seed
-        rank: DDP process rank (default: 0 for single-GPU)
-        num_workers_per_rank: Workers per GPU (default: 1)
-
-    Returns:
-        The derived worker seed.
-
-    Note: Workers inherit identical RNG states after fork in multiprocessing.
-          This function MUST be called to re-seed each worker's RNG.
-    """
-    # Ensure unique seeds: rank_offset + worker_offset + 1
     seed = int(base_seed) + (rank * num_workers_per_rank) + worker_id + 1
     random.seed(seed)
     np.random.seed(seed % (2**32 - 1))
-    try:  # pragma: no cover - torch optional in tests
+    try:  # pragma: no cover
         import torch
 
         torch.manual_seed(seed)
@@ -345,7 +385,18 @@ def worker_init(
 
 
 def is_enabled(cfg: AugConfig) -> bool:
-    """Check whether augmentation is active."""
-    return cfg.lib in {"nlpaug", "textattack", "both"} and bool(
-        _resolve_methods(cfg.lib, cfg.methods)
-    )
+    if not cfg.enabled:
+        return False
+    try:
+        return bool(_resolve_methods(cfg.methods))
+    except KeyError:
+        return False
+
+
+__all__ = [
+    "AugConfig",
+    "AugResources",
+    "AugmenterPipeline",
+    "is_enabled",
+    "worker_init",
+]

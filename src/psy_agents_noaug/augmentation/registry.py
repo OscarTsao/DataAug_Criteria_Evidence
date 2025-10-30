@@ -1,10 +1,4 @@
-"""Registry of on‑the‑fly text augmenters.
-
-Unifies disparate augmentation libraries (nlpaug, TextAttack) behind a single
-wrapper interface. Each registered method builds an ``AugmenterWrapper`` that
-exposes ``augment_one(text) -> str``. If an underlying augmenter produces a
-list (common in TextAttack), the wrapper returns the first non‑empty string.
-"""
+"""Allowlisted registry of lightweight, on-the-fly augmentation methods."""
 
 from __future__ import annotations
 
@@ -29,6 +23,49 @@ from textattack.augmentation.recipes import (
 
 LOGGER = logging.getLogger(__name__)
 
+ALLOWED_METHODS: tuple[str, ...] = (
+    # nlpaug (char)
+    "nlpaug/char/KeyboardAug",
+    "nlpaug/char/OcrAug",
+    "nlpaug/char/RandomCharAug",
+    # nlpaug (word)
+    "nlpaug/word/RandomWordAug",
+    "nlpaug/word/ReservedAug",
+    "nlpaug/word/SpellingAug",
+    "nlpaug/word/SplitAug",
+    "nlpaug/word/SynonymAug(wordnet)",
+    "nlpaug/word/AntonymAug(wordnet)",
+    "nlpaug/word/TfIdfAug",
+    # TextAttack
+    "textattack/CharSwapAugmenter",
+    "textattack/DeletionAugmenter",
+    "textattack/SwapAugmenter",
+    "textattack/SynonymInsertionAugmenter",
+    "textattack/EasyDataAugmenter",
+    "textattack/CheckListAugmenter",
+    "textattack/WordNetAugmenter",
+)
+
+AUGMENTATION_BANLIST: tuple[str, ...] = (
+    # nlpaug heavy augmenters
+    "nlpaug/word/ContextualWordEmbsAug",
+    "nlpaug/word/ContextualWordEmbsForSentenceAug",
+    "nlpaug/word/BackTranslationAug",
+    "nlpaug/summarizer/AbstSummAug",
+    "nlpaug/word/LambadaAug",
+    "nlpaug/word/WordEmbsAug",
+    # TextAttack heavy augmenters
+    "textattack/CLAREAugmenter",
+    "textattack/BackTranslationAugmenter",
+    "textattack/BackTranscriptionAugmenter",
+    "textattack/EmbeddingAugmenter",
+)
+
+LEGACY_NAME_MAP = {
+    "nlpaug/word/SynonymAug": "nlpaug/word/SynonymAug(wordnet)",
+    "nlpaug/word/AntonymAug": "nlpaug/word/AntonymAug(wordnet)",
+}
+
 
 class AugmenterWrapper:
     """Normalise augmenter outputs to a single string result."""
@@ -39,54 +76,32 @@ class AugmenterWrapper:
         self._returns_list = returns_list
 
     def augment_one(self, text: str) -> str:
-        """Apply augmentation safely, returning the original text on failure.
-
-        Defensive behaviour ensures the training loop never breaks due to
-        augmentation errors or corner cases – empty lists, None returns, etc.
-        """
         try:
             result = self._augmenter.augment(text)
-        except Exception as exc:  # pragma: no cover - defensive path
+        except Exception as exc:  # pragma: no cover - defensive
             LOGGER.debug("Augmenter %s failed: %s", self.name, exc)
-            return text
-
-        if result is None:
             return text
 
         if isinstance(result, str):
             return result or text
-
         if isinstance(result, list):
-            if not result:
-                return text
-            if self._returns_list:
-                candidate = result[0]
-                return candidate if isinstance(candidate, str) and candidate else text
             for candidate in result:
                 if isinstance(candidate, str) and candidate:
                     return candidate
             return text
-
-        return text
+        if result is None:
+            return text
+        return str(result)
 
 
 def _load_reserved_tokens(reserved_map_path: str | Path) -> dict[str, str] | list[str]:
-    """Load reserved tokens for ReservedAug.
-
-    The JSON can be a mapping (e.g., canonical forms) or a list of tokens.
-    """
-    data_path = Path(reserved_map_path)
-    if not data_path.exists():
-        raise FileNotFoundError(f"Reserved map not found: {data_path}")
-
-    raw = json.loads(data_path.read_text(encoding="utf-8"))
-    if isinstance(raw, dict):
+    path = Path(reserved_map_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Reserved map not found: {path}")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict) or isinstance(raw, list):
         return raw
-    if isinstance(raw, list):
-        return raw
-    raise ValueError(
-        f"Reserved map must be dict or list, received {type(raw).__name__}"
-    )
+    raise ValueError("Reserved map must be dict or list")
 
 
 AugmenterFactory = Callable[..., AugmenterWrapper]
@@ -94,8 +109,6 @@ AugmenterFactory = Callable[..., AugmenterWrapper]
 
 @dataclass(frozen=True)
 class RegistryEntry:
-    """Metadata describing a single augmentation method."""
-
     lib: str
     factory: AugmenterFactory
 
@@ -103,12 +116,10 @@ class RegistryEntry:
 def _wrap(
     factory: Callable[..., Any], *, returns_list: bool = False, name: str | None = None
 ) -> AugmenterFactory:
-    """Wrap a concrete augmenter factory into an ``AugmenterWrapper`` builder."""
-
     def _builder(**kwargs: Any) -> AugmenterWrapper:
         augmenter = factory(**kwargs)
         augmenter_name = name or getattr(factory, "__name__", "augmenter")
-        return AugmenterWrapper(augmenter_name, augmenter, returns_list=returns_list)  # type: ignore[arg-type]
+        return AugmenterWrapper(augmenter_name, augmenter, returns_list=returns_list)
 
     return _builder
 
@@ -116,24 +127,29 @@ def _wrap(
 def _make_reserved(
     reserved_map_path: str | Path | None, **kwargs: Any
 ) -> AugmenterWrapper:
-    """Factory for ``naw.ReservedAug`` that validates required resources."""
     if reserved_map_path is None:
         raise ValueError("reserved_map_path is required for ReservedAug")
-    reserved_tokens = _load_reserved_tokens(reserved_map_path)
-    augmenter = naw.ReservedAug(reserved_tokens=reserved_tokens, **kwargs)
+    tokens = _load_reserved_tokens(reserved_map_path)
+    augmenter = naw.ReservedAug(reserved_tokens=tokens, **kwargs)
     return AugmenterWrapper("ReservedAug", augmenter)
 
 
 def _make_tfidf(model_path: str | Path | None, **kwargs: Any) -> AugmenterWrapper:
-    """Factory for ``naw.TfIdfAug`` that validates required resources."""
     if model_path is None:
         raise ValueError("model_path is required for TfIdfAug")
     augmenter = naw.TfIdfAug(model_path=str(model_path), **kwargs)
     return AugmenterWrapper("TfIdfAug", augmenter)
 
 
+def _ensure_allowlist_consistency() -> None:
+    for banned in AUGMENTATION_BANLIST:
+        if banned in ALLOWED_METHODS:
+            raise AssertionError(f"Banned augmenter {banned} present in allowlist")
+
+
+_ensure_allowlist_consistency()
+
 REGISTRY: dict[str, RegistryEntry] = {
-    # nlpaug char-level
     "nlpaug/char/KeyboardAug": RegistryEntry(
         lib="nlpaug", factory=_wrap(nac.KeyboardAug, name="KeyboardAug")
     ),
@@ -143,7 +159,6 @@ REGISTRY: dict[str, RegistryEntry] = {
     "nlpaug/char/RandomCharAug": RegistryEntry(
         lib="nlpaug", factory=_wrap(nac.RandomCharAug, name="RandomCharAug")
     ),
-    # nlpaug word-level
     "nlpaug/word/RandomWordAug": RegistryEntry(
         lib="nlpaug", factory=_wrap(naw.RandomWordAug, name="RandomWordAug")
     ),
@@ -154,20 +169,21 @@ REGISTRY: dict[str, RegistryEntry] = {
     "nlpaug/word/SplitAug": RegistryEntry(
         lib="nlpaug", factory=_wrap(naw.SplitAug, name="SplitAug")
     ),
-    "nlpaug/word/SynonymAug": RegistryEntry(
+    "nlpaug/word/SynonymAug(wordnet)": RegistryEntry(
         lib="nlpaug",
         factory=_wrap(
-            lambda **kw: naw.SynonymAug(aug_src="wordnet", **kw), name="SynonymAug"
+            lambda **kw: naw.SynonymAug(aug_src="wordnet", **kw),
+            name="SynonymAug(wordnet)",
         ),
     ),
-    "nlpaug/word/AntonymAug": RegistryEntry(
+    "nlpaug/word/AntonymAug(wordnet)": RegistryEntry(
         lib="nlpaug",
         factory=_wrap(
-            lambda **kw: naw.AntonymAug(aug_src="wordnet", **kw), name="AntonymAug"
+            lambda **kw: naw.AntonymAug(**kw),
+            name="AntonymAug(wordnet)",
         ),
     ),
     "nlpaug/word/TfIdfAug": RegistryEntry(lib="nlpaug", factory=_make_tfidf),
-    # TextAttack recipes
     "textattack/CharSwapAugmenter": RegistryEntry(
         lib="textattack",
         factory=_wrap(CharSwapAugmenter, returns_list=True, name="CharSwapAugmenter"),
@@ -202,10 +218,34 @@ REGISTRY: dict[str, RegistryEntry] = {
     ),
 }
 
-ALL_METHODS: list[str] = list(REGISTRY.keys())
+missing_allow = set(ALLOWED_METHODS) - set(REGISTRY.keys())
+if missing_allow:
+    raise RuntimeError(
+        f"Augmentation registry missing allowlisted methods: {sorted(missing_allow)}"
+    )
+
+extra_registered = set(REGISTRY.keys()) - set(ALLOWED_METHODS)
+if extra_registered:
+    raise RuntimeError(
+        f"Augmentation registry has non-allowlisted methods: {sorted(extra_registered)}"
+    )
+
+ALL_METHODS: list[str] = list(ALLOWED_METHODS)
 NLPAUG_METHODS: list[str] = [
-    name for name, entry in REGISTRY.items() if entry.lib == "nlpaug"
+    name for name in ALL_METHODS if REGISTRY[name].lib == "nlpaug"
 ]
 TEXTATTACK_METHODS: list[str] = [
-    name for name, entry in REGISTRY.items() if entry.lib == "textattack"
+    name for name in ALL_METHODS if REGISTRY[name].lib == "textattack"
+]
+
+__all__ = [
+    "REGISTRY",
+    "ALL_METHODS",
+    "NLPAUG_METHODS",
+    "TEXTATTACK_METHODS",
+    "ALLOWED_METHODS",
+    "AUGMENTATION_BANLIST",
+    "LEGACY_NAME_MAP",
+    "AugmenterWrapper",
+    "RegistryEntry",
 ]

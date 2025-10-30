@@ -9,6 +9,7 @@ import pytest
 
 from psy_agents_noaug.augmentation.registry import (
     ALL_METHODS,
+    AUGMENTATION_BANLIST,
     NLPAUG_METHODS,
     REGISTRY,
     TEXTATTACK_METHODS,
@@ -33,9 +34,12 @@ class TestRegistryStructure:
 
     def test_registry_not_empty(self):
         """Test that registry contains augmenters."""
-        assert (
-            len(REGISTRY) >= 17
-        ), f"Expected at least 17 augmenters, got {len(REGISTRY)}"
+        assert len(REGISTRY) == len(ALL_METHODS)
+
+    def test_registry_size_matches_allowlist(self):
+        """Registry should match allowlist exactly (17 entries)."""
+        assert len(ALL_METHODS) == 17
+        assert len(REGISTRY) == 17
 
     def test_all_methods_list(self):
         """Test ALL_METHODS list is populated."""
@@ -51,6 +55,7 @@ class TestRegistryStructure:
         """Test TEXTATTACK_METHODS list is populated."""
         assert isinstance(TEXTATTACK_METHODS, list)
         assert len(TEXTATTACK_METHODS) >= 7
+        assert not any(m.startswith("nlpaug/") for m in TEXTATTACK_METHODS)
 
     def test_no_overlap_between_libs(self):
         """Test that nlpaug and textattack methods don't overlap."""
@@ -67,6 +72,12 @@ class TestRegistryStructure:
 
         assert nlpaug_set.issubset(all_set)
         assert textattack_set.issubset(all_set)
+
+    def test_banlist_not_registered(self):
+        """Ensure heavy augmenters remain unregistered for on-the-fly usage."""
+        registered = set(REGISTRY.keys())
+        overlap = registered.intersection(AUGMENTATION_BANLIST)
+        assert not overlap, f"Banned augmenters unexpectedly registered: {overlap}"
 
 
 class TestAugmenterWrapper:
@@ -178,8 +189,8 @@ class TestNlpaugWordAugmenters:
             "nlpaug/word/RandomWordAug",
             "nlpaug/word/SpellingAug",
             "nlpaug/word/SplitAug",
-            "nlpaug/word/SynonymAug",
-            # AntonymAug is excluded - nlpaug API changed and no longer supports aug_src
+            "nlpaug/word/SynonymAug(wordnet)",
+            "nlpaug/word/AntonymAug(wordnet)",
         ],
     )
     def test_word_augmenter_basic(self, augmenter_name, short_text):
@@ -294,7 +305,7 @@ class TestPerformance:
         """Test that word augmentation completes quickly."""
         import time
 
-        entry = REGISTRY["nlpaug/word/SynonymAug"]
+        entry = REGISTRY["nlpaug/word/SynonymAug(wordnet)"]
         wrapper = entry.factory(aug_p=0.1)
 
         start = time.time()
@@ -317,7 +328,7 @@ class TestEdgeCases:
 
     def test_very_short_text(self):
         """Test augmenters handle very short text."""
-        entry = REGISTRY["nlpaug/word/SynonymAug"]
+        entry = REGISTRY["nlpaug/word/SynonymAug(wordnet)"]
         wrapper = entry.factory(aug_p=0.3)
         result = wrapper.augment_one("Hi")
         assert isinstance(result, str)

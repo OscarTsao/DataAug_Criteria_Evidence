@@ -6,15 +6,14 @@ Tests: Multi-operation augmentation, statistics, error recovery, edge cases, wor
 """
 
 import random
-import time
 
 import numpy as np
 import pytest
 
 from psy_agents_noaug.augmentation.pipeline import (
     AugConfig,
-    AugResources,
     AugmenterPipeline,
+    AugResources,
     _clamp,
     _merge_kwargs,
     _ratio_kwargs,
@@ -105,7 +104,7 @@ class TestRatioKwargsFunction:
 
     def test_ratio_kwargs_nlpaug_word(self):
         """Test nlpaug word augmenters get aug_p."""
-        result = _ratio_kwargs("nlpaug/word/SynonymAug", 0.3)
+        result = _ratio_kwargs("nlpaug/word/SynonymAug(wordnet)", 0.3)
         assert result == {"aug_p": 0.3}
 
     def test_ratio_kwargs_textattack_charswap(self):
@@ -263,7 +262,9 @@ class TestAugmenterPipelineInit:
 
     def test_pipeline_init_clamps_ops_per_sample(self):
         """Test that ops_per_sample is clamped to [1, 2]."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], ops_per_sample=5)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], ops_per_sample=5
+        )
         pipeline = AugmenterPipeline(cfg)
         assert pipeline.ops_per_sample == 2
 
@@ -319,7 +320,9 @@ class TestAugmenterPipelineCall:
 
     def test_call_with_p_apply_zero_skips(self, sample_text):
         """Test that p_apply=0 always skips augmentation."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=0.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=0.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline(sample_text)
@@ -329,7 +332,9 @@ class TestAugmenterPipelineCall:
 
     def test_call_with_p_apply_one_applies(self, sample_text):
         """Test that p_apply=1.0 always applies augmentation."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline(sample_text)
@@ -339,7 +344,9 @@ class TestAugmenterPipelineCall:
 
     def test_call_increments_total_count(self, sample_text):
         """Test that each call increments total count."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         pipeline(sample_text)
@@ -355,7 +362,7 @@ class TestAugmenterPipelineCall:
             methods=["nlpaug/char/KeyboardAug"],
             p_apply=1.0,
             ops_per_sample=2,
-            seed=42
+            seed=42,
         )
         pipeline = AugmenterPipeline(cfg)
 
@@ -369,7 +376,7 @@ class TestAugmenterPipelineCall:
             methods=["nlpaug/char/KeyboardAug"],
             p_apply=1.0,
             seed=42,
-            example_limit=2
+            example_limit=2,
         )
         pipeline = AugmenterPipeline(cfg)
 
@@ -381,7 +388,9 @@ class TestAugmenterPipelineCall:
 
     def test_call_empty_text(self):
         """Test augmentation with empty text."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline("")
@@ -403,7 +412,9 @@ class TestAugmenterPipelineStats:
 
     def test_stats_after_calls(self, sample_text):
         """Test stats() after making calls."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=0.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=0.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         for _ in range(5):
@@ -416,7 +427,9 @@ class TestAugmenterPipelineStats:
 
     def test_stats_method_counts(self, sample_text):
         """Test that method counts are tracked."""
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         for _ in range(3):
@@ -443,7 +456,7 @@ class TestAugmenterPipelineDrainExamples:
             methods=["nlpaug/char/KeyboardAug"],
             p_apply=1.0,
             seed=42,
-            example_limit=10
+            example_limit=10,
         )
         pipeline = AugmenterPipeline(cfg)
 
@@ -464,7 +477,7 @@ class TestAugmenterPipelineDrainExamples:
             methods=["nlpaug/char/KeyboardAug"],
             p_apply=1.0,
             seed=42,
-            example_limit=10
+            example_limit=10,
         )
         pipeline = AugmenterPipeline(cfg)
 
@@ -482,15 +495,15 @@ class TestAugmenterPipelineDrainExamples:
 
 
 class TestAugmenterPipelineMultipleMethods:
-"""Test pipeline with multiple augmentation methods."""
+    """Test pipeline with multiple augmentation methods."""
 
     def test_multiple_methods_selection(self, sample_text):
         """Test that multiple methods are randomly selected."""
         cfg = AugConfig(
             lib="nlpaug",
-            methods=["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug"],
+            methods=["nlpaug/char/KeyboardAug", "nlpaug/word/SynonymAug(wordnet)"],
             p_apply=1.0,
-            seed=42
+            seed=42,
         )
         pipeline = AugmenterPipeline(cfg)
 
@@ -507,7 +520,9 @@ class TestAugmenterPipelineEdgeCases:
     def test_very_long_text(self):
         """Test augmentation with very long text."""
         long_text = " ".join(["Patient shows symptoms."] * 100)
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline(long_text)
@@ -516,7 +531,9 @@ class TestAugmenterPipelineEdgeCases:
     def test_special_characters(self):
         """Test augmentation with special characters."""
         text = "Patient: @#$%^&*() symptoms!!!"
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline(text)
@@ -525,7 +542,9 @@ class TestAugmenterPipelineEdgeCases:
     def test_unicode_text(self):
         """Test augmentation with Unicode text."""
         text = "Patient avec symptômes émotionnels"
-        cfg = AugConfig(lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42)
+        cfg = AugConfig(
+            lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], p_apply=1.0, seed=42
+        )
         pipeline = AugmenterPipeline(cfg)
 
         result = pipeline(text)

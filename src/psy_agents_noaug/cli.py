@@ -18,6 +18,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import optuna
 import typer
 
 # Top-level app: subcommands are declared below.
@@ -58,21 +59,24 @@ def train(
     config: str | None = typer.Option(
         None, help="Optional JSON config to override defaults"
     ),
-    aug_lib: str = typer.Option(
-        "none",
-        "--aug-lib",
-        help="Augmentation library: none|nlpaug|textattack|both",
+    aug_enabled: bool = typer.Option(
+        False,
+        "--aug-enabled/--no-aug-enabled",
+        help="Enable on-the-fly augmentation",
     ),
     aug_methods: str = typer.Option(
         "all",
         "--aug-methods",
-        help="Comma separated augmenter names or 'all'",
+        help="Comma separated augmenter IDs (use 'all' for full allowlist)",
     ),
     aug_p_apply: float = typer.Option(0.15, "--aug-p-apply"),
     aug_ops_per_sample: int = typer.Option(1, "--aug-ops-per-sample"),
     aug_max_replace: float = typer.Option(0.3, "--aug-max-replace"),
     aug_tfidf_model: str | None = typer.Option(None, "--aug-tfidf-model"),
     aug_reserved_map: str | None = typer.Option(None, "--aug-reserved-map"),
+    antonym_guard: str = typer.Option(
+        "off", "--antonym-guard", help="off|on_low_weight"
+    ),
     loader_workers: int | None = typer.Option(None, "--loader-workers"),
     prefetch_factor: int | None = typer.Option(None, "--prefetch-factor"),
 ):
@@ -90,12 +94,13 @@ def train(
     methods = [m.strip() for m in aug_methods.split(",") if m.strip()]
     if not methods:
         methods = ["all"]
+    ops = max(1, min(3, aug_ops_per_sample))
 
     typer.echo(
         f"[train] agent={agent} model={model_name} epochs={epochs} seed={seed} outdir={outdir}"
     )
     typer.echo(
-        f"[train] augment lib={aug_lib} methods={methods} p_apply={aug_p_apply:.2f} ops={aug_ops_per_sample} max_replace={aug_max_replace:.2f}"
+        f"[train] augmentation enabled={aug_enabled} methods={methods} p_apply={aug_p_apply:.2f} ops={ops} max_replace={aug_max_replace:.2f} antonym_guard={antonym_guard}"
     )
     if loader_workers is not None or prefetch_factor is not None:
         typer.echo(
@@ -121,18 +126,15 @@ def tune(
     storage: str | None = typer.Option(
         None, help="Optuna storage URL (e.g., sqlite:///path/to.db)"
     ),
-    multi_objective: bool = typer.Option(False),
-    from_best_of: str | None = typer.Option(
-        None, "--from-best-of", help="Seed augmentation sweep from another study"
+    stage: str = typer.Option("A", "--stage", help="A | B | C"),
+    from_study: str | None = typer.Option(
+        None,
+        "--from-study",
+        help="Stage-B: previous Stage-A study | Stage-C: previous Stage-B study",
     ),
-    hpo_augment_only: bool = typer.Option(
-        False, "--hpo-augment-only", help="Search augmentation params only"
+    pareto_limit: int = typer.Option(
+        5, "--pareto-limit", help="Stage-C candidate count from Stage-B Pareto front"
     ),
-    aug_lib: str = typer.Option("none", "--aug-lib"),
-    aug_methods: str = typer.Option("all", "--aug-methods"),
-    aug_p_apply: float = typer.Option(0.15, "--aug-p-apply"),
-    aug_ops_per_sample: int = typer.Option(1, "--aug-ops-per-sample"),
-    aug_max_replace: float = typer.Option(0.3, "--aug-max-replace"),
 ):
     """Launch maximal HPO via ``scripts/tune_max.py``.
 
@@ -143,12 +145,11 @@ def tune(
     _ensure_mlflow(outdir)
     storage = storage or f"sqlite:///{Path('./_optuna/noaug.db').absolute()}"
     typer.echo(
-        f"[tune] agent={agent} study={study} augment-lib={aug_lib} methods={aug_methods}"
+        f"[tune] agent={agent} study={study} stage={stage} "
+        f"n_trials={n_trials} parallel={parallel}"
     )
-    if from_best_of:
-        typer.echo(f"[tune] initializing from study={from_best_of}")
-    if hpo_augment_only:
-        typer.echo("[tune] restricting search space to augmentation parameters")
+    if from_study:
+        typer.echo(f"[tune] staging from study={from_study}")
 
     cmd = [
         "python",
@@ -165,11 +166,15 @@ def tune(
         outdir,
         "--storage",
         storage,
+        "--stage",
+        stage,
     ]
     if timeout is not None:
         cmd += ["--timeout", str(timeout)]
-    if multi_objective:
-        cmd += ["--multi-objective"]
+    if from_study:
+        cmd += ["--from-study", from_study]
+    if stage.upper() == "C" and pareto_limit:
+        cmd += ["--pareto-limit", str(pareto_limit)]
     subprocess.run(cmd, check=True)
 
 
@@ -177,23 +182,102 @@ def tune(
 def show_best(
     agent: str = typer.Option(...),
     study: str = typer.Option(...),
-    outdir: str | None = typer.Option(None),
+    storage: str | None = typer.Option(None),
     topk: int = typer.Option(5),
 ):
-    """Pretty‑print top‑K trials exported by ``tune_max.py``.
+    """Print top-K trials directly from the Optuna study."""
 
-    Expects a JSON file produced by the tuner at ``{outdir}/{agent}_{study}_topk.json``.
-    """
-    outdir = _default_outdir(outdir)
-    path = Path(outdir) / f"{agent}_{study}_topk.json"
-    if not path.exists():
-        typer.echo(f"Not found: {path}")
-        raise typer.Exit(1)
-    data = json.loads(path.read_text())
-    for i, t in enumerate(data[:topk], 1):
-        val = t.get("value")
-        params = t.get("params", {})
-        typer.echo(f"[{i}] value={val:.4f}  params={json.dumps(params)[:500]}...")
+    storage = storage or "sqlite:///./_optuna/noaug.db"
+    study_obj = optuna.load_study(study_name=study, storage=storage)
+    trials = sorted(
+        [t for t in study_obj.get_trials(deepcopy=False) if t.values is not None],
+        key=lambda t: -(t.user_attrs.get("primary", t.value or 0.0)),
+    )
+    if not trials:
+        typer.echo("No completed trials found.")
+        raise typer.Exit(0)
+    for rank, trial in enumerate(trials[:topk], 1):
+        value = trial.values if isinstance(trial.values, tuple) else trial.value
+        params_json = trial.user_attrs.get("config_json")
+        params = json.loads(params_json) if params_json else trial.params
+        typer.echo(
+            f"[{rank}] value={value} params={json.dumps(params, sort_keys=True)[:400]}"
+        )
+
+
+@app.command("hpo-max")
+def hpo_max(
+    agent: str = typer.Option(..., help="criteria|evidence|share|joint"),
+    trials: int = typer.Option(100),
+    epochs: int = typer.Option(6),
+    multi_objective: bool = typer.Option(False),
+    timeout_min: int | None = typer.Option(None),
+    seeds: str = typer.Option("1"),
+    sampler: str = typer.Option("auto"),
+    pruner: str = typer.Option("asha"),
+):
+    """Run maximal HPO via scripts/tune_max.py."""
+
+    cmd = [
+        "python",
+        "scripts/tune_max.py",
+        "--agent",
+        agent,
+        "--trials",
+        str(trials),
+        "--epochs",
+        str(epochs),
+        "--seeds",
+        seeds,
+        "--sampler",
+        sampler,
+        "--pruner",
+        pruner,
+    ]
+    if multi_objective:
+        cmd.append("--multi-objective")
+    if timeout_min is not None:
+        cmd.extend(["--timeout-min", str(timeout_min)])
+    subprocess.run(cmd, check=True)
+
+
+@app.command("hpo-stage")
+def hpo_stage(
+    agent: str = typer.Option(..., help="criteria|evidence|share|joint"),
+    stage0_trials: int = typer.Option(64),
+    stage1_trials: int = typer.Option(32),
+    stage2_trials: int = typer.Option(16),
+    stage0_epochs: int = typer.Option(3),
+    stage1_epochs: int = typer.Option(6),
+    stage2_epochs: int = typer.Option(10),
+    refit_epochs: int = typer.Option(12),
+    seeds: str = typer.Option("1"),
+):
+    """Run staged HPO pipeline (S0→S1→S2→Refit)."""
+
+    cmd = [
+        "python",
+        "scripts/run_hpo_stage.py",
+        "--agent",
+        agent,
+        "--stage0-trials",
+        str(stage0_trials),
+        "--stage1-trials",
+        str(stage1_trials),
+        "--stage2-trials",
+        str(stage2_trials),
+        "--stage0-epochs",
+        str(stage0_epochs),
+        "--stage1-epochs",
+        str(stage1_epochs),
+        "--stage2-epochs",
+        str(stage2_epochs),
+        "--refit-epochs",
+        str(refit_epochs),
+        "--seeds",
+        seeds,
+    ]
+    subprocess.run(cmd, check=True)
 
 
 @app.command("tune-supermax")

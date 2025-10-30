@@ -153,7 +153,7 @@ class TestPipelineParameters:
             lib="nlpaug", methods=["nlpaug/char/KeyboardAug"], max_replace_ratio=2.0
         )
         pipeline = AugmenterPipeline(cfg)
-        assert 0.0 <= pipeline.max_replace_ratio <= 1.0
+        assert 0.0 <= pipeline.max_replace <= 1.0
 
 
 class TestPipelineMethodResolution:
@@ -172,7 +172,7 @@ class TestPipelineMethodResolution:
                 "nlpaug/word/RandomWordAug",
                 "nlpaug/word/SpellingAug",
                 "nlpaug/word/SplitAug",
-                "nlpaug/word/SynonymAug",
+                "nlpaug/word/SynonymAug(wordnet)",
             ],
             seed=42,
         )

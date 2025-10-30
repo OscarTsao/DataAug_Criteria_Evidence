@@ -1,20 +1,14 @@
-"""Utilities for constructing augmentation pipelines for the evidence task.
-
-This module keeps augmentation concerns isolated from dataset construction. It
-decides which methods are active, prepares any external resources (e.g. TF‑IDF
-models), and returns a frozen bundle the loader can use safely.
-"""
+"""Utilities for constructing augmentation pipelines for the evidence task."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from psy_agents_noaug.augmentation import (
-    ALL_METHODS,
-    NLPAUG_METHODS,
-    TEXTATTACK_METHODS,
+    ALLOWED_METHODS,
+    LEGACY_NAME_MAP,
     AugConfig,
     AugmenterPipeline,
     AugResources,
@@ -23,14 +17,9 @@ from psy_agents_noaug.augmentation import (
     load_or_fit_tfidf,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
-
 
 @dataclass(frozen=True)
 class AugmentationArtifacts:
-    """Container bundling augmentation pipeline and fitted resources."""
-
     pipeline: AugmenterPipeline
     config: AugConfig
     resources: AugResources
@@ -39,7 +28,6 @@ class AugmentationArtifacts:
 
 
 def _ensure_sequence(methods: Sequence[str] | str | None) -> list[str]:
-    """Normalise a possibly scalar methods arg into a list of strings."""
     if methods is None:
         return []
     if isinstance(methods, str):
@@ -47,32 +35,27 @@ def _ensure_sequence(methods: Sequence[str] | str | None) -> list[str]:
     return list(methods)
 
 
-def resolve_methods(lib: str, methods: Sequence[str] | str | None) -> list[str]:
-    """Resolve declared methods to concrete augmenter identifiers.
+def _resolve_methods(methods: Sequence[str] | str | None) -> list[str]:
+    declared = [
+        LEGACY_NAME_MAP.get(m.strip(), m.strip()) for m in _ensure_sequence(methods)
+    ]
+    if not declared:
+        declared = ["all"]
 
-    Supports the special value ``"all"`` which expands to all methods available
-    within the selected library family. Ensures stable ordering and de‑dupes.
-    """
-    if lib == "none":
-        return []
-
-    allowed_map = {
-        "nlpaug": NLPAUG_METHODS,
-        "textattack": TEXTATTACK_METHODS,
-        "both": ALL_METHODS,
-    }
-    allowed = allowed_map.get(lib, [])
-
-    declared = _ensure_sequence(methods)
     resolved: list[str] = []
     for method in declared:
-        if method == "all":
-            resolved.extend(allowed)
+        lowered = method.lower()
+        if lowered in {"all"}:
+            resolved.extend(ALLOWED_METHODS)
             continue
-        if method not in ALL_METHODS:
+        if lowered in {"nlpaug", "nlpaug/all"}:
+            resolved.extend([m for m in ALLOWED_METHODS if m.startswith("nlpaug/")])
+            continue
+        if lowered in {"textattack", "textattack/all"}:
+            resolved.extend([m for m in ALLOWED_METHODS if m.startswith("textattack/")])
+            continue
+        if method not in ALLOWED_METHODS:
             raise KeyError(f"Unknown augmentation method: {method}")
-        if lib != "both" and method not in allowed:
-            continue
         resolved.append(method)
 
     unique: list[str] = []
@@ -85,29 +68,51 @@ def resolve_methods(lib: str, methods: Sequence[str] | str | None) -> list[str]:
     return unique
 
 
+def resolve_methods(lib: str, methods: Sequence[str] | str | None) -> list[str]:
+    """Public helper that filters resolved methods by library name."""
+    lib_lower = (lib or "").lower()
+    if lib_lower in {"none", ""}:
+        return []
+    if methods in (None, [], (), ""):
+        return []
+    resolved = _resolve_methods(methods)
+    if lib_lower == "nlpaug":
+        return [m for m in resolved if m.startswith("nlpaug/")]
+    if lib_lower == "textattack":
+        return [m for m in resolved if m.startswith("textattack/")]
+    return resolved
+
+
 def build_evidence_augmenter(
     cfg: AugConfig,
     train_texts: Iterable[str],
     *,
     tfidf_dir: str | Path = "_artifacts/tfidf/evidence",
 ) -> AugmentationArtifacts | None:
-    """Instantiate augmentation pipeline for evidence task if enabled.
-
-    Side effects: may fit/load a TF‑IDF vectoriser when requested.
-    """
     if not is_enabled(cfg):
         return None
 
     cfg_copy = replace(cfg)
-    resolved_methods = resolve_methods(cfg_copy.lib, cfg_copy.methods)
-
-    texts = [str(text) for text in train_texts]
+    resolved_methods = _resolve_methods(cfg_copy.methods)
 
     resources = AugResources(
         tfidf_model_path=cfg_copy.tfidf_model_path,
         reserved_map_path=cfg_copy.reserved_map_path,
     )
     tfidf_resource: TfidfResource | None = None
+
+    filtered_methods: list[str] = []
+    for method in resolved_methods:
+        if method == "nlpaug/word/ReservedAug" and not (
+            cfg_copy.reserved_map_path or resources.reserved_map_path
+        ):
+            continue
+        filtered_methods.append(method)
+
+    resolved_methods = filtered_methods
+    cfg_copy = replace(cfg_copy, methods=tuple(resolved_methods))
+
+    texts = [str(text) for text in train_texts]
 
     if any(method.endswith("TfIdfAug") for method in resolved_methods):
         target_dir = Path(tfidf_dir)
@@ -119,9 +124,8 @@ def build_evidence_augmenter(
         )
         tfidf_resource = load_or_fit_tfidf(texts, model_path)
         resources.tfidf_model_path = str(tfidf_resource.path)
-        cfg_copy.tfidf_model_path = str(tfidf_resource.path)
+        cfg_copy = replace(cfg_copy, tfidf_model_path=str(tfidf_resource.path))
 
-    # Build the pipeline and seed its internal RNG for reproducibility
     pipeline = AugmenterPipeline(cfg_copy, resources=resources)
     pipeline.set_seed(cfg_copy.seed)
 
@@ -130,7 +134,7 @@ def build_evidence_augmenter(
         config=cfg_copy,
         resources=resources,
         tfidf=tfidf_resource,
-        methods=tuple(resolved_methods),
+        methods=tuple(pipeline.methods),
     )
 
 

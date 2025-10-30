@@ -59,7 +59,9 @@ tests/
 ├── test_groundtruth.py        # Ground truth generation tests
 ├── test_loaders.py            # Data loader tests
 ├── test_training_smoke.py     # Training smoke tests
-└── test_hpo_config.py         # HPO configuration tests
+├── test_hpo_config.py         # Legacy HPO configuration tests
+├── test_hpo_max_smoke.py      # Maximal HPO smoke regression
+└── test_hpo_stage_smoke.py    # Multi-stage HPO smoke regression
 ```
 
 ## Shared Fixtures
@@ -74,6 +76,12 @@ Common fixtures are defined in `tests/conftest.py`:
 - `mock_tokenizer`: Mocked tokenizer for testing
 - `mock_model`: Mocked model for testing
 
+### HPO Smoke Mode
+
+The new HPO smoke tests set `HPO_SMOKE_MODE=1`, which short‑circuits the training
+pipeline and returns deterministic metrics. This keeps `pytest` fast and avoids
+external downloads while still exercising the orchestration logic.
+
 ## Writing Tests
 
 ### Unit Test Example
@@ -82,10 +90,10 @@ Common fixtures are defined in `tests/conftest.py`:
 def test_normalize_status_value(field_map_path):
     """Test status value normalization."""
     from psy_agents_noaug.data.groundtruth import load_field_map, normalize_status_value
-    
+
     field_map = load_field_map(field_map_path)
     status_map = field_map['status_values']
-    
+
     assert normalize_status_value('positive', status_map) == 1
     assert normalize_status_value('negative', status_map) == 0
 ```
@@ -97,10 +105,10 @@ def test_data_pipeline_end_to_end(sample_posts, sample_annotations):
     """Test complete data pipeline."""
     # Generate ground truth
     criteria_gt = create_criteria_groundtruth(...)
-    
+
     # Create dataloaders
     train_loader, val_loader, test_loader = create_criteria_dataloaders(...)
-    
+
     # Verify loaders work
     assert train_loader is not None
 ```

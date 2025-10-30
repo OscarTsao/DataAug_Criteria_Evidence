@@ -28,7 +28,6 @@ from psy_agents_noaug.augmentation import (
     NLPAUG_METHODS,
     REGISTRY,
     TEXTATTACK_METHODS,
-    AugConfig,
     AugResources,
 )
 
@@ -63,17 +62,8 @@ def profile_augmenter(
     Returns:
         Dictionary with profiling metrics
     """
-    # Create minimal config for this method
-    lib = "nlpaug" if method_name in NLPAUG_METHODS else "textattack"
-
-    AugConfig(
-        lib=lib,
-        methods=[method_name],
-        p_apply=1.0,  # Always apply for profiling
-        ops_per_sample=1,
-        max_replace_ratio=0.3,
-        seed=42,
-    )
+    if method_name not in REGISTRY:
+        raise ValueError(f"Unknown augmentation method: {method_name}")
 
     # Handle special methods that require resources
     if method_name == "nlpaug/word/TfIdfAug":

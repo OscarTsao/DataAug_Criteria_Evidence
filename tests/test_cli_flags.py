@@ -89,6 +89,22 @@ class TestTrainCommand:
         assert "agent=evidence" in result.stdout
         assert "epochs=5" in result.stdout
         assert "seed=123" in result.stdout
+        assert "antonym_guard=off" in result.stdout
+
+    def test_train_with_antonym_guard_flag(self, runner):
+        """Test train command with antonym guard override."""
+        result = runner.invoke(
+            app,
+            [
+                "train",
+                "--agent",
+                "criteria",
+                "--antonym-guard",
+                "on_low_weight",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "antonym_guard=on_low_weight" in result.stdout
 
     def test_train_with_config_file(self, runner, temp_config):
         """Test train command with config file."""
@@ -156,7 +172,12 @@ class TestTuneCommand:
                 str(tmp_path),
                 "--storage",
                 "sqlite:///test.db",
-                "--multi-objective",
+                "--stage",
+                "B",
+                "--from-study",
+                "noaug-evidence-max",
+                "--pareto-limit",
+                "3",
             ],
         )
         # May fail if script doesn't exist, but flags should parse
@@ -184,9 +205,8 @@ class TestShowBestCommand:
                 "nonexistent",
             ],
         )
-        # Should exit with error or message about missing file
-        # Exact behavior depends on implementation
-        assert result.exit_code in [0, 1]
+        # Should exit with non-zero status because study does not exist
+        assert result.exit_code != 0
 
     def test_show_best_with_topk(self, runner, tmp_path):
         """Test show-best with topk parameter."""
@@ -209,7 +229,7 @@ class TestShowBestCommand:
             ],
         )
         # Should succeed or handle missing file gracefully
-        assert result.exit_code in [0, 1]
+        assert result.exit_code != 0
 
 
 class TestAgentValidation:

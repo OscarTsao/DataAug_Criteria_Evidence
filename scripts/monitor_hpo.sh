@@ -13,6 +13,15 @@ echo "Target: GPU >90%, RAM <90%" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 while true; do
+    # Detect main HPO process if PID file exists
+    if [ -f .hpo_all.pid ]; then
+        HPO_PID=$(cat .hpo_all.pid || true)
+        if [ -n "$HPO_PID" ]; then
+            if ! ps -p "$HPO_PID" > /dev/null 2>&1; then
+                echo "[CRITICAL] HPO process not running (pid=$HPO_PID)" | tee -a "$ALERT_FILE"
+            fi
+        fi
+    fi
     # Get GPU utilization
     gpu_util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)
     gpu_mem=$(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits | awk -F', ' '{printf "%.1f", ($1/$2)*100}')
