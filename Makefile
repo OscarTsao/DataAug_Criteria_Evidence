@@ -556,6 +556,97 @@ show-sampler-recommendations:
 	poetry run python scripts/compare_samplers.py --show-recommendations
 
 #==============================================================================
+# SUPERMAX Phase 10: Meta-Learning & Warm-Starting
+#==============================================================================
+
+## test-meta-learning: Test meta-learning functionality
+test-meta-learning:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: Testing Meta-Learning$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/test_meta_learning.py
+
+## analyze-hpo: Analyze a completed HPO study
+analyze-hpo:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: HPO Study Analysis$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$(STUDY)" ]; then \
+		echo "$(RED)Error: STUDY not specified$(NC)"; \
+		echo "Usage: make analyze-hpo STUDY=criteria-maximal-hpo"; \
+		exit 1; \
+	fi
+	poetry run python scripts/analyze_hpo.py \
+		--study $(STUDY) \
+		--storage $(OPTUNA_STORAGE) \
+		--detailed
+
+## compare-hpo-studies: Compare multiple HPO studies
+compare-hpo-studies:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: Compare HPO Studies$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$(STUDIES)" ]; then \
+		echo "$(RED)Error: STUDIES not specified$(NC)"; \
+		echo "Usage: make compare-hpo-studies STUDIES='criteria-max evidence-max'"; \
+		exit 1; \
+	fi
+	poetry run python scripts/analyze_hpo.py \
+		--studies $(STUDIES) \
+		--storage $(OPTUNA_STORAGE) \
+		--compare \
+		--analyze-convergence
+
+## show-transfer-recommendations: Show transfer learning recommendations
+show-transfer-recommendations:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: Transfer Learning Recommendations$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$(TARGET_TASK)" ]; then \
+		echo "$(RED)Error: TARGET_TASK not specified$(NC)"; \
+		echo "Usage: make show-transfer-recommendations TARGET_TASK=joint AVAILABLE='criteria-max evidence-max'"; \
+		exit 1; \
+	fi
+	poetry run python scripts/analyze_hpo.py \
+		--transfer-to $(TARGET_TASK) \
+		--available-studies $(AVAILABLE)
+
+## warm-start-hpo: Create warm-started HPO study
+warm-start-hpo:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: Warm-Start HPO Study$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$(NEW_STUDY)" ] || [ -z "$(SOURCE_STUDY)" ]; then \
+		echo "$(RED)Error: NEW_STUDY or SOURCE_STUDY not specified$(NC)"; \
+		echo "Usage: make warm-start-hpo NEW_STUDY=evidence-ws SOURCE_STUDY=criteria-max"; \
+		exit 1; \
+	fi
+	poetry run python scripts/warm_start_hpo.py \
+		--new-study $(NEW_STUDY) \
+		--source-study $(SOURCE_STUDY) \
+		--storage $(OPTUNA_STORAGE) \
+		--n-configs $(or $(N_CONFIGS),10) \
+		--strategy $(or $(STRATEGY),best)
+
+## transfer-hpo: Create study with transfer learning
+transfer-hpo:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 10: Transfer Learning HPO$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$(NEW_STUDY)" ] || [ -z "$(SOURCE_STUDY)" ] || [ -z "$(SOURCE_TASK)" ] || [ -z "$(TARGET_TASK)" ]; then \
+		echo "$(RED)Error: Required parameters not specified$(NC)"; \
+		echo "Usage: make transfer-hpo NEW_STUDY=evidence-tl SOURCE_STUDY=criteria-max SOURCE_TASK=criteria TARGET_TASK=evidence"; \
+		exit 1; \
+	fi
+	poetry run python scripts/warm_start_hpo.py \
+		--new-study $(NEW_STUDY) \
+		--source-study $(SOURCE_STUDY) \
+		--source-task $(SOURCE_TASK) \
+		--target-task $(TARGET_TASK) \
+		--storage $(OPTUNA_STORAGE) \
+		--n-configs $(or $(N_CONFIGS),10)
+
+#==============================================================================
 # Development
 #==============================================================================
 
