@@ -7,7 +7,7 @@
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
-.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test
+.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -66,6 +66,9 @@ help:
 	@echo "  make stage-a-all             - Stage-A for all 4 agents"
 	@echo "  make stage-b AGENT=<agent> STAGE_A_JSON=<path> - Stage-B multi-objective (1500 trials, 10 epochs)"
 	@echo "  make stage-b-test AGENT=<agent> STAGE_A_JSON=<path> - Stage-B smoke test (20 trials, 3 epochs)"
+	@echo "  make stage-c AGENT=<agent> STAGE_B_JSON=<path> - Stage-C K-fold CV (5-fold, 15 epochs)"
+	@echo "  make stage-c-test AGENT=<agent> STAGE_B_JSON=<path> - Stage-C smoke test (2-fold, 3 epochs)"
+	@echo "  make full-supermax AGENT=<agent> - Complete Stage-A→B→C pipeline"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -335,6 +338,52 @@ stage-b-test:
 	@echo "$(BLUE)SUPERMAX Stage-B: Smoke Test (20 trials)$(NC)"
 	@echo "$(BLUE)===========================================================$(NC)"
 	STAGE_B_TRIALS=20 STAGE_B_EPOCHS=3 $(MAKE) stage-b AGENT=$(AGENT) STAGE_A_JSON=$(STAGE_A_JSON)
+
+## stage-c: SUPERMAX Stage-C K-fold cross-validation (default: 5-fold)
+stage-c:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-C: K-fold Cross-Validation Refinement$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(YELLOW)Agent: $(AGENT)$(NC)"
+	@echo "$(YELLOW)K-folds: $${STAGE_C_KFOLDS:-5}$(NC)"
+	@echo "$(YELLOW)Epochs: $${STAGE_C_EPOCHS:-15}$(NC)"
+	@echo "$(YELLOW)Stage-B input: $${STAGE_B_JSON}$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@if [ -z "$$STAGE_B_JSON" ]; then \
+		echo "$(RED)Error: STAGE_B_JSON not set$(NC)"; \
+		echo "$(YELLOW)Usage: make stage-c AGENT=criteria STAGE_B_JSON=path/to/stage_b_pareto.json$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/run_stage_c.py \
+		--agent $(AGENT) \
+		--stage-b-results $$STAGE_B_JSON \
+		--k-folds $${STAGE_C_KFOLDS:-5} \
+		--epochs $${STAGE_C_EPOCHS:-15} \
+		--patience $${HPO_PATIENCE:-4} \
+		--max-samples $${HPO_MAX_SAMPLES:-0} \
+		--outdir outputs/supermax/stage_c/$(AGENT)
+
+## stage-c-test: SUPERMAX Stage-C smoke test (2-fold, 3 epochs)
+stage-c-test:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-C: Smoke Test (2-fold)$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	STAGE_C_KFOLDS=2 STAGE_C_EPOCHS=3 $(MAKE) stage-c AGENT=$(AGENT) STAGE_B_JSON=$(STAGE_B_JSON)
+
+## full-supermax: Run complete Stage-A→B→C pipeline
+full-supermax:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Full Pipeline: Stage-A → Stage-B → Stage-C$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(YELLOW)Running Stage-A (baseline exploration)...$(NC)"
+	$(MAKE) stage-a AGENT=$(AGENT)
+	@echo "$(YELLOW)Running Stage-B (multi-objective)...$(NC)"
+	STAGE_A_JSON=outputs/supermax/stage_a/$(AGENT)/$(AGENT)_stage_a_top50.json \
+		$(MAKE) stage-b AGENT=$(AGENT)
+	@echo "$(YELLOW)Running Stage-C (K-fold CV)...$(NC)"
+	STAGE_B_JSON=outputs/supermax/stage_b/$(AGENT)/$(AGENT)_stage_b_pareto.json \
+		$(MAKE) stage-c AGENT=$(AGENT)
+	@echo "$(GREEN)✓ SUPERMAX pipeline complete for $(AGENT)!$(NC)"
 
 #==============================================================================
 # Development
