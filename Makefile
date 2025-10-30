@@ -7,7 +7,7 @@
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
-.PHONY: stage-a stage-a-test stage-a-all
+.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -63,7 +63,9 @@ help:
 	@echo "$(GREEN)SUPERMAX Multi-Stage HPO (Phase 5):$(NC)"
 	@echo "  make stage-a AGENT=<agent>   - Stage-A baseline exploration (default: 1000 trials, 6 epochs)"
 	@echo "  make stage-a-test AGENT=<agent> - Stage-A smoke test (20 trials, 2 epochs)"
-	@echo "  make stage-a-all             - Stage-A for all 4 agents (criteria, evidence, share, joint)"
+	@echo "  make stage-a-all             - Stage-A for all 4 agents"
+	@echo "  make stage-b AGENT=<agent> STAGE_A_JSON=<path> - Stage-B multi-objective (1500 trials, 10 epochs)"
+	@echo "  make stage-b-test AGENT=<agent> STAGE_A_JSON=<path> - Stage-B smoke test (20 trials, 3 epochs)"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -302,6 +304,37 @@ stage-a-all:
 	$(MAKE) stage-a AGENT=share
 	$(MAKE) stage-a AGENT=joint
 	@echo "$(GREEN)✓ Stage-A complete for all agents$(NC)"
+
+## stage-b: SUPERMAX Stage-B multi-objective optimization (default: 1500 trials)
+stage-b:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-B: Multi-objective Optimization (NSGA-II)$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(YELLOW)Agent: $(AGENT)$(NC)"
+	@echo "$(YELLOW)Trials: $${STAGE_B_TRIALS:-1500}$(NC)"
+	@echo "$(YELLOW)Epochs: $${STAGE_B_EPOCHS:-10}$(NC)"
+	@echo "$(YELLOW)Stage-A input: $${STAGE_A_JSON}$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@if [ -z "$$STAGE_A_JSON" ]; then \
+		echo "$(RED)Error: STAGE_A_JSON not set$(NC)"; \
+		echo "$(YELLOW)Usage: make stage-b AGENT=criteria STAGE_A_JSON=path/to/stage_a_top50.json$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/run_stage_b.py \
+		--agent $(AGENT) \
+		--stage-a-results $$STAGE_A_JSON \
+		--trials $${STAGE_B_TRIALS:-1500} \
+		--epochs $${STAGE_B_EPOCHS:-10} \
+		--patience $${HPO_PATIENCE:-3} \
+		--max-samples $${HPO_MAX_SAMPLES:-512} \
+		--outdir outputs/supermax/stage_b/$(AGENT)
+
+## stage-b-test: SUPERMAX Stage-B smoke test (20 trials, 3 epochs)
+stage-b-test:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)SUPERMAX Stage-B: Smoke Test (20 trials)$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	STAGE_B_TRIALS=20 STAGE_B_EPOCHS=3 $(MAKE) stage-b AGENT=$(AGENT) STAGE_A_JSON=$(STAGE_A_JSON)
 
 #==============================================================================
 # Development
