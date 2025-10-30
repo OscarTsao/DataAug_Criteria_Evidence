@@ -7,7 +7,7 @@
 .PHONY: tune-evidence-3stage-full tune-evidence-3stage-smoke tune-criteria-3stage-full
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
-.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax
+.PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax build-ensemble build-ensemble-test
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -69,6 +69,10 @@ help:
 	@echo "  make stage-c AGENT=<agent> STAGE_B_JSON=<path> - Stage-C K-fold CV (5-fold, 15 epochs)"
 	@echo "  make stage-c-test AGENT=<agent> STAGE_B_JSON=<path> - Stage-C smoke test (2-fold, 3 epochs)"
 	@echo "  make full-supermax AGENT=<agent> - Complete Stage-A→B→C pipeline"
+	@echo ""
+	@echo "$(GREEN)SUPERMAX Ensemble Building (Phase 6):$(NC)"
+	@echo "  make build-ensemble AGENT=<agent> ENSEMBLE_INPUT=<path> ENSEMBLE_TYPE=<pareto|cv> - Build ensemble from results"
+	@echo "  make build-ensemble-test AGENT=<agent> ENSEMBLE_INPUT=<path> ENSEMBLE_TYPE=<type> - Test with simulated predictions"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -384,6 +388,38 @@ full-supermax:
 	STAGE_B_JSON=outputs/supermax/stage_b/$(AGENT)/$(AGENT)_stage_b_pareto.json \
 		$(MAKE) stage-c AGENT=$(AGENT)
 	@echo "$(GREEN)✓ SUPERMAX pipeline complete for $(AGENT)!$(NC)"
+
+## build-ensemble: Build ensemble from Stage-B/C results (Phase 6)
+build-ensemble:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 6: Ensemble Selection$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(YELLOW)Agent: $(AGENT)$(NC)"
+	@echo "$(YELLOW)Input: $${ENSEMBLE_INPUT}$(NC)"
+	@echo "$(YELLOW)Type: $${ENSEMBLE_TYPE:-pareto}$(NC)"
+	@echo "$(YELLOW)N models: $${ENSEMBLE_N_MODELS:-5}$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@if [ -z "$$ENSEMBLE_INPUT" ]; then \
+		echo "$(RED)Error: ENSEMBLE_INPUT not set$(NC)"; \
+		echo "$(YELLOW)Usage: make build-ensemble AGENT=<agent> ENSEMBLE_INPUT=<path> [ENSEMBLE_TYPE=pareto|cv]$(NC)"; \
+		exit 1; \
+	fi
+	poetry run python scripts/build_ensemble.py \
+		--agent $(AGENT) \
+		--input-file $$ENSEMBLE_INPUT \
+		--input-type $${ENSEMBLE_TYPE:-pareto} \
+		--n-models $${ENSEMBLE_N_MODELS:-5} \
+		--selection-strategy $${ENSEMBLE_STRATEGY:-hybrid} \
+		--diversity-weight $${ENSEMBLE_DIV_WEIGHT:-0.3} \
+		$${ENSEMBLE_SIMULATE:+--simulate} \
+		--outdir outputs/supermax/ensemble/$(AGENT)
+
+## build-ensemble-test: Test ensemble building with simulated predictions
+build-ensemble-test:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 6: Ensemble Test (Simulated)$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	ENSEMBLE_SIMULATE=1 ENSEMBLE_N_MODELS=2 $(MAKE) build-ensemble AGENT=$(AGENT) ENSEMBLE_INPUT=$(ENSEMBLE_INPUT) ENSEMBLE_TYPE=$(ENSEMBLE_TYPE)
 
 #==============================================================================
 # Development
