@@ -700,6 +700,17 @@ check-gpu-availability:
 	@poetry run python -c "from psy_agents_noaug.hpo.distributed import check_gpu_availability; import json; info = check_gpu_availability(); print(json.dumps(info, indent=2))"
 
 #==============================================================================
+# SUPERMAX Phase 13: Results Analysis & Visualization
+#==============================================================================
+
+## test-visualization: Test visualization functionality
+test-visualization:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 13: Testing Visualization$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/test_visualization.py
+
+#==============================================================================
 # Development
 #==============================================================================
 
