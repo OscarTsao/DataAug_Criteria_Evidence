@@ -8,6 +8,7 @@
 .PHONY: tune-criteria-supermax tune-evidence-supermax tune-share-supermax tune-joint-supermax tune-all-supermax
 .PHONY: full-hpo-all maximal-hpo-all show-best-%
 .PHONY: stage-a stage-a-test stage-a-all stage-b stage-b-test stage-c stage-c-test full-supermax build-ensemble build-ensemble-test monitor-hpo list-hpo-studies check-hpo-health
+.PHONY: compare-pruners compare-pruners-test show-pruner-budget show-pruner-recommendations
 .PHONY: audit audit-strict sbom licenses compliance bench verify-determinism train-with-json-logs
 .PHONY: retrain-evidence-aug retrain-evidence-noaug
 .PHONY: docker-build docker-test docker-run docker-shell docker-clean docker-mlflow
@@ -78,6 +79,12 @@ help:
 	@echo "  make list-hpo-studies HPO_STORAGE=<storage> - List all studies in database"
 	@echo "  make monitor-hpo HPO_STUDY_NAME=<study> HPO_STORAGE=<storage> - Monitor study in real-time"
 	@echo "  make check-hpo-health HPO_STUDY_NAME=<study> HPO_STORAGE=<storage> - Run health check"
+	@echo ""
+	@echo "$(GREEN)SUPERMAX Advanced Pruners & Search Strategies (Phase 8):$(NC)"
+	@echo "  make compare-pruners           - Compare pruners on ML-style benchmark (50 trials)"
+	@echo "  make compare-pruners-test      - Quick pruner comparison test (20 trials)"
+	@echo "  make show-pruner-budget        - Show resource budget estimation examples"
+	@echo "  make show-pruner-recommendations - Show pruner recommendations for common scenarios"
 	@echo ""
 	@echo "$(GREEN)Evaluation:$(NC)"
 	@echo "  make eval               - Evaluate best model on test set"
@@ -475,6 +482,43 @@ check-hpo-health:
 		--study-name $$HPO_STUDY_NAME \
 		--storage $$HPO_STORAGE \
 		--check-health
+
+#==============================================================================
+# SUPERMAX Phase 8: Advanced Pruners & Search Strategies
+#==============================================================================
+
+## compare-pruners: Compare pruning strategies on benchmark (Phase 8)
+compare-pruners:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 8: Pruner Comparison$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/compare_pruners.py \
+		--benchmark $${PRUNER_BENCHMARK:-ml_convergence} \
+		--n-trials $${PRUNER_N_TRIALS:-50} \
+		--n-steps $${PRUNER_N_STEPS:-20} \
+		--output $${PRUNER_OUTPUT:-outputs/pruner_comparison.json}
+	@echo "$(GREEN)✓ Pruner comparison complete!$(NC)"
+
+## compare-pruners-test: Quick pruner comparison test
+compare-pruners-test:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 8: Quick Pruner Test$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	PRUNER_N_TRIALS=20 PRUNER_N_STEPS=10 PRUNER_OUTPUT=outputs/pruner_test.json $(MAKE) compare-pruners
+
+## show-pruner-budget: Show resource budget estimation
+show-pruner-budget:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 8: Resource Budget Estimation$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/compare_pruners.py --show-budget
+
+## show-pruner-recommendations: Show pruner recommendations
+show-pruner-recommendations:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 8: Pruner Recommendations$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/compare_pruners.py --show-recommendation
 
 #==============================================================================
 # Development
