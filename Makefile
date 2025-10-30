@@ -647,6 +647,17 @@ transfer-hpo:
 		--n-configs $(or $(N_CONFIGS),10)
 
 #==============================================================================
+# SUPERMAX Phase 11: Ensemble Methods & Model Selection
+#==============================================================================
+
+## test-ensemble: Test ensemble methods functionality
+test-ensemble:
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	@echo "$(BLUE)SUPERMAX Phase 11: Testing Ensemble Methods$(NC)"
+	@echo "$(BLUE)===========================================================$ $(NC)"
+	poetry run python scripts/test_ensemble.py
+
+#==============================================================================
 # Development
 #==============================================================================
 
