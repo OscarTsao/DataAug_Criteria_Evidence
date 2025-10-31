@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability test-data-quality test-feature-store
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability test-data-quality test-feature-store test-governance
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -129,6 +129,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Feature Store & Engineering (Phase 24):$(NC)"
 	@echo "  make test-feature-store - Test feature registry, versioning, computation, serving"
+	@echo ""
+	@echo "$(GREEN)Model Governance & Compliance (Phase 25):$(NC)"
+	@echo "  make test-governance    - Test model cards, bias detection, compliance, audit trails"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -545,6 +548,22 @@ test-feature-store:
 	poetry run python scripts/test_feature_store.py
 	@echo ""
 	@echo "$(GREEN)✓ Feature store tests completed!$(NC)"
+
+## test-governance: Test model governance and compliance framework
+test-governance:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 25: Testing Model Governance & Compliance$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Model cards (creation, documentation, export)"
+	@echo "  - Bias detection (demographic parity, equal opportunity, disparate impact)"
+	@echo "  - Compliance tracking (GDPR, HIPAA, CCPA)"
+	@echo "  - Audit trails (logging, lineage, reporting)"
+	@echo ""
+	poetry run python scripts/test_governance.py
+	@echo ""
+	@echo "$(GREEN)✓ Governance tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
