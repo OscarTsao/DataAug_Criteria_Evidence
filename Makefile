@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment
+.PHONY: test-deployment test-experiment test-cicd
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -102,6 +102,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Experiment Tracking (Phase 15):$(NC)"
 	@echo "  make test-experiment    - Test experiment tracking functionality (tracking, versioning, reproducibility, comparison)"
+	@echo ""
+	@echo "$(GREEN)CI/CD Integration (Phase 16):$(NC)"
+	@echo "  make test-cicd          - Test CI/CD workflows (workflow manager, quality gates, pipeline orchestration)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -335,6 +338,26 @@ test-experiment:
 	poetry run python scripts/test_experiment.py
 	@echo ""
 	@echo "$(GREEN)✓ Experiment tracking tests completed!$(NC)"
+
+#==============================================================================
+# CI/CD Integration & Automated Workflows (Phase 16)
+#==============================================================================
+
+## test-cicd: Test CI/CD workflows and automation
+test-cicd:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 16: Testing CI/CD Integration & Workflows$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - WorkflowManager (workflow orchestration with dependencies)"
+	@echo "  - QualityGateValidator (quality gate validation with thresholds)"
+	@echo "  - Pipeline (multi-stage pipeline execution with artifacts)"
+	@echo "  - Failure handling and error scenarios"
+	@echo ""
+	poetry run python scripts/test_cicd.py
+	@echo ""
+	@echo "$(GREEN)✓ CI/CD integration tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
