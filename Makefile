@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd
+.PHONY: test-deployment test-experiment test-cicd test-monitoring
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -105,6 +105,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)CI/CD Integration (Phase 16):$(NC)"
 	@echo "  make test-cicd          - Test CI/CD workflows (workflow manager, quality gates, pipeline orchestration)"
+	@echo ""
+	@echo "$(GREEN)Model Monitoring (Phase 17):$(NC)"
+	@echo "  make test-monitoring    - Test monitoring system (performance, drift detection, health checks, alerts)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -358,6 +361,27 @@ test-cicd:
 	poetry run python scripts/test_cicd.py
 	@echo ""
 	@echo "$(GREEN)✓ CI/CD integration tests completed!$(NC)"
+
+#==============================================================================
+# Model Monitoring & Observability (Phase 17)
+#==============================================================================
+
+## test-monitoring: Test model monitoring and observability
+test-monitoring:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 17: Testing Model Monitoring & Observability$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - PerformanceMonitor (latency, throughput, resource usage)"
+	@echo "  - DriftDetector (data drift, prediction drift detection)"
+	@echo "  - HealthMonitor (health checks, status monitoring)"
+	@echo "  - AlertManager (alerting rules, notifications)"
+	@echo "  - Integrated monitoring scenario"
+	@echo ""
+	poetry run python scripts/test_monitoring.py
+	@echo ""
+	@echo "$(GREEN)✓ Model monitoring tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
