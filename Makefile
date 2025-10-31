@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability test-data-quality
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -123,6 +123,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Model Interpretability & Explainability (Phase 22):$(NC)"
 	@echo "  make test-interpretability - Test SHAP, attention viz, feature importance, explanations, counterfactuals"
+	@echo ""
+	@echo "$(GREEN)Data Quality & Drift Detection (Phase 23):$(NC)"
+	@echo "  make test-data-quality  - Test drift detection, validation, quality metrics, anomaly detection"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -506,6 +509,23 @@ test-interpretability:
 	poetry run python scripts/test_interpretability.py
 	@echo ""
 	@echo "$(GREEN)✓ Interpretability tests completed!$(NC)"
+
+## test-data-quality: Test data quality and drift detection framework
+test-data-quality:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 23: Testing Data Quality & Drift Detection$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Drift detection (KS test, PSI, Jensen-Shannon)"
+	@echo "  - Data validation (type, range, not-null, unique)"
+	@echo "  - Quality metrics (completeness, validity, consistency)"
+	@echo "  - Quality reporting (multi-feature analysis)"
+	@echo "  - Anomaly detection (IQR, Z-score, Isolation Forest)"
+	@echo ""
+	poetry run python scripts/test_data_quality.py
+	@echo ""
+	@echo "$(GREEN)✓ Data quality tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
