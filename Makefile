@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -111,6 +111,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)API Serving (Phase 18):$(NC)"
 	@echo "  make test-api           - Test REST API endpoints (predictions, health, metrics, batch processing)"
+	@echo ""
+	@echo "$(GREEN)Security & Authentication (Phase 19):$(NC)"
+	@echo "  make test-security      - Test security features (API keys, rate limiting, auth, headers)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -407,6 +410,28 @@ test-api:
 	poetry run python scripts/test_api.py
 	@echo ""
 	@echo "$(GREEN)✓ API serving tests completed!$(NC)"
+
+#==============================================================================
+# Security & Authentication (Phase 19)
+#==============================================================================
+
+## test-security: Test security and authentication features
+test-security:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 19: Testing Security & Authentication$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - API key creation and validation"
+	@echo "  - Key expiration and revocation"
+	@echo "  - Rate limiting and throttling"
+	@echo "  - Endpoint-specific limits"
+	@echo "  - Authentication manager"
+	@echo "  - Security headers"
+	@echo ""
+	poetry run python scripts/test_security.py
+	@echo ""
+	@echo "$(GREEN)✓ Security tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
