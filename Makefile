@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -120,6 +120,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)A/B Testing & Experimentation (Phase 21):$(NC)"
 	@echo "  make test-ab            - Test A/B testing framework (traffic splitting, experiments, stats, tracking)"
+	@echo ""
+	@echo "$(GREEN)Model Interpretability & Explainability (Phase 22):$(NC)"
+	@echo "  make test-interpretability - Test SHAP, attention viz, feature importance, explanations, counterfactuals"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -484,6 +487,25 @@ test-ab:
 	poetry run python scripts/test_ab_testing.py
 	@echo ""
 	@echo "$(GREEN)✓ A/B testing tests completed!$(NC)"
+
+## test-interpretability: Test model interpretability and explainability framework
+test-interpretability:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 22: Testing Model Interpretability & Explainability$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - SHAP explanations (gradient-based approximation)"
+	@echo "  - Attention visualization (transformer attention weights)"
+	@echo "  - Feature importance (gradient, integrated gradients, ablation)"
+	@echo "  - Importance tracking and aggregation"
+	@echo "  - Model explainer (unified interface)"
+	@echo "  - Counterfactual generation"
+	@echo "  - Batch explanations"
+	@echo ""
+	poetry run python scripts/test_interpretability.py
+	@echo ""
+	@echo "$(GREEN)✓ Interpretability tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
