@@ -16,7 +16,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +80,7 @@ class AlertManager:
         self.rules: dict[str, AlertRule] = {}
         self.alert_history: list[Alert] = []
         self.last_alert_time: dict[str, datetime] = {}
+        self.alert_log_file: Path | None
 
         # Configure alert log file
         if alert_log_file:
@@ -251,8 +255,8 @@ class AlertManager:
                     rule.severity.value,
                 )
 
-            except Exception as e:
-                LOGGER.error("Error checking rule %s: %s", rule.name, e)
+            except Exception:
+                LOGGER.exception("Error checking rule %s", rule.name)
 
         return triggered_alerts
 
@@ -269,11 +273,7 @@ class AlertManager:
             List of recent alerts
         """
         cutoff = datetime.now() - timedelta(hours=hours)
-        return [
-            alert
-            for alert in self.alert_history
-            if alert.timestamp > cutoff
-        ]
+        return [alert for alert in self.alert_history if alert.timestamp > cutoff]
 
     def get_summary(self) -> dict[str, Any]:
         """Get alerting summary.
@@ -298,8 +298,7 @@ class AlertManager:
             "total_rules": len(self.rules),
             "alerts_last_24h": len(recent_alerts),
             "severity_counts": {
-                severity.value: count
-                for severity, count in severity_counts.items()
+                severity.value: count for severity, count in severity_counts.items()
             },
             "recent_alerts": [
                 {

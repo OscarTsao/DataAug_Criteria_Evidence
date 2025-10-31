@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -108,6 +108,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Model Monitoring (Phase 17):$(NC)"
 	@echo "  make test-monitoring    - Test monitoring system (performance, drift detection, health checks, alerts)"
+	@echo ""
+	@echo "$(GREEN)API Serving (Phase 18):$(NC)"
+	@echo "  make test-api           - Test REST API endpoints (predictions, health, metrics, batch processing)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -382,6 +385,28 @@ test-monitoring:
 	poetry run python scripts/test_monitoring.py
 	@echo ""
 	@echo "$(GREEN)✓ Model monitoring tests completed!$(NC)"
+
+#==============================================================================
+# API Serving & REST Endpoints (Phase 18)
+#==============================================================================
+
+## test-api: Test REST API endpoints and serving
+test-api:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 18: Testing API Serving & REST Endpoints$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Root and info endpoints"
+	@echo "  - Health check and readiness endpoints"
+	@echo "  - Metrics endpoint (performance, requests)"
+	@echo "  - Single prediction endpoint"
+	@echo "  - Batch prediction endpoint"
+	@echo "  - Request validation and error handling"
+	@echo ""
+	poetry run python scripts/test_api.py
+	@echo ""
+	@echo "$(GREEN)✓ API serving tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
