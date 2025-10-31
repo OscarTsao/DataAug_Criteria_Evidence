@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment
+.PHONY: test-deployment test-experiment
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -99,6 +99,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Deployment (Phase 14):$(NC)"
 	@echo "  make test-deployment    - Test deployment functionality (registry, packaging, deployment)"
+	@echo ""
+	@echo "$(GREEN)Experiment Tracking (Phase 15):$(NC)"
+	@echo "  make test-experiment    - Test experiment tracking functionality (tracking, versioning, reproducibility, comparison)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -312,6 +315,26 @@ test-deployment:
 	poetry run python scripts/test_deployment.py
 	@echo ""
 	@echo "$(GREEN)✓ Deployment tests completed!$(NC)"
+
+#==============================================================================
+# Experiment Tracking & Reproducibility (Phase 15)
+#==============================================================================
+
+## test-experiment: Test experiment tracking functionality
+test-experiment:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 15: Testing Experiment Tracking & Reproducibility$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - ExperimentTracker (comprehensive experiment tracking)"
+	@echo "  - ConfigVersioner (configuration version control)"
+	@echo "  - ReproducibilityManager (reproducibility guarantees)"
+	@echo "  - ExperimentComparator (experiment comparison)"
+	@echo ""
+	poetry run python scripts/test_experiment.py
+	@echo ""
+	@echo "$(GREEN)✓ Experiment tracking tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
