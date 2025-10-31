@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -114,6 +114,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Security & Authentication (Phase 19):$(NC)"
 	@echo "  make test-security      - Test security features (API keys, rate limiting, auth, headers)"
+	@echo ""
+	@echo "$(GREEN)Model Registry (Phase 20):$(NC)"
+	@echo "  make test-registry      - Test model versioning, metadata, promotion workflows, lineage tracking"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -432,6 +435,29 @@ test-security:
 	poetry run python scripts/test_security.py
 	@echo ""
 	@echo "$(GREEN)✓ Security tests completed!$(NC)"
+
+#==============================================================================
+# Model Versioning & Registry (Phase 20)
+#==============================================================================
+
+## test-registry: Test model versioning and registry features
+test-registry:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 20: Testing Model Versioning & Registry$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Semantic versioning"
+	@echo "  - Model version registration and tagging"
+	@echo "  - Model metadata tracking and comparison"
+	@echo "  - Promotion workflows (dev → staging → production)"
+	@echo "  - Approval workflows"
+	@echo "  - Model lineage and provenance tracking"
+	@echo "  - Lineage graph traversal"
+	@echo ""
+	poetry run python scripts/test_registry.py
+	@echo ""
+	@echo "$(GREEN)✓ Model registry tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
