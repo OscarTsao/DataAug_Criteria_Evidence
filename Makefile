@@ -142,6 +142,9 @@ help:
 	@echo "$(GREEN)Model Registry & Versioning (Phase 28):$(NC)"
 	@echo "  make test-registry       - Test model registration, versioning, lifecycle management"
 	@echo ""
+	@echo "$(GREEN)Model Serving & Deployment (Phase 29):$(NC)"
+	@echo "  make test-serving        - Test model loading, prediction API, batch inference, monitoring"
+	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
 	@echo "  make typecheck          - Run mypy type checking"
@@ -482,6 +485,22 @@ test-registry:
 	poetry run python scripts/test_registry.py
 	@echo ""
 	@echo "$(GREEN)✓ Model registry tests completed!$(NC)"
+
+test-serving:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 29: Testing Model Serving & Deployment$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - ModelLoader (PyTorch loading, device management, caching)"
+	@echo "  - Predictor (prediction API, batch inference, confidence extraction)"
+	@echo "  - PredictionRequest/Response contracts"
+	@echo "  - Monitor integration (performance and prediction monitors)"
+	@echo "  - Registry-based model loading"
+	@echo ""
+	poetry run python scripts/test_serving.py
+	@echo ""
+	@echo "$(GREEN)✓ Model serving tests completed!$(NC)"
 
 #==============================================================================
 # A/B Testing & Experimentation (Phase 21)
