@@ -148,6 +148,13 @@ help:
 	@echo "$(GREEN)Deployment Automation & CI/CD (Phase 30):$(NC)"
 	@echo "  make test-deployment     - Test deployment strategies, health checks, rollback, orchestration"
 	@echo ""
+	@echo "$(GREEN)Integration & CI/CD (Phase 31):$(NC)"
+	@echo "  make test-integration    - Test end-to-end workflows across all phases"
+	@echo "  make docker-build        - Build Docker image"
+	@echo "  make docker-up           - Start services with docker-compose"
+	@echo "  make docker-down         - Stop docker-compose services"
+	@echo "  make docker-test         - Run tests in Docker container"
+	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
 	@echo "  make typecheck          - Run mypy type checking"
@@ -522,6 +529,59 @@ test-deployment:
 	poetry run python scripts/test_deployment.py
 	@echo ""
 	@echo "$(GREEN)✓ Deployment automation tests completed!$(NC)"
+
+test-integration:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 31: Testing End-to-End Integration$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Complete end-to-end workflows"
+	@echo "  - Model lifecycle (register → version → deploy)"
+	@echo "  - Monitoring integration"
+	@echo "  - Registry + Serving + Deployment integration"
+	@echo "  - Multi-phase workflows"
+	@echo ""
+	poetry run python scripts/test_integration.py
+	@echo ""
+	@echo "$(GREEN)✓ Integration tests completed!$(NC)"
+
+#==============================================================================
+# Docker & CI/CD Targets (Phase 31)
+#==============================================================================
+
+## docker-build: Build Docker image
+docker-build:
+	@echo "$(BLUE)Building Docker image...$(NC)"
+	docker build -t psy-agents-noaug:latest .
+	@echo "$(GREEN)✓ Docker image built successfully$(NC)"
+
+## docker-up: Start services with docker-compose
+docker-up:
+	@echo "$(BLUE)Starting services with docker-compose...$(NC)"
+	docker-compose up -d
+	@echo "$(GREEN)✓ Services started$(NC)"
+	@echo ""
+	@echo "Access MLflow UI at: http://localhost:5000"
+
+## docker-down: Stop docker-compose services
+docker-down:
+	@echo "$(BLUE)Stopping docker-compose services...$(NC)"
+	docker-compose down
+	@echo "$(GREEN)✓ Services stopped$(NC)"
+
+## docker-test: Run tests in Docker container
+docker-test:
+	@echo "$(BLUE)Running tests in Docker container...$(NC)"
+	docker-compose run --rm test
+	@echo "$(GREEN)✓ Docker tests completed$(NC)"
+
+## docker-clean: Clean Docker images and containers
+docker-clean:
+	@echo "$(BLUE)Cleaning Docker resources...$(NC)"
+	docker-compose down -v
+	docker rmi psy-agents-noaug:latest || true
+	@echo "$(GREEN)✓ Docker cleanup completed$(NC)"
 
 #==============================================================================
 # A/B Testing & Experimentation (Phase 21)

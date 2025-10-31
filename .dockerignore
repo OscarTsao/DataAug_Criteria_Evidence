@@ -1,143 +1,66 @@
-# ============================================================================
-# .dockerignore - Exclude unnecessary files from Docker build context
-# ============================================================================
+# Git
+.git
+.gitignore
+.gitattributes
 
-# Python cache and bytecode
-__pycache__/
+# Python
+__pycache__
 *.py[cod]
 *$py.class
 *.so
 .Python
+*.egg-info
+dist
+build
+*.egg
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.cover
 
 # Virtual environments
-env/
-venv/
-.venv/
-ENV/
-env.bak/
-venv.bak/
+.venv
+venv
+ENV
+env
 
-# Package management
-pip-log.txt
-pip-delete-this-directory.txt
-.installed.cfg
-*.egg-info/
-*.egg
-MANIFEST
-
-# Testing
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.hypothesis/
-.nox/
-coverage.xml
-*.cover
-.cache
-nosetests.xml
-
-# Type checking
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-.pytype/
-
-# IDEs and editors
-.vscode/
-.idea/
+# IDEs
+.vscode
+.idea
 *.swp
 *.swo
 *~
-.project
-.pydevproject
-.settings/
-*.sublime-project
-*.sublime-workspace
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Build artifacts
-build/
-dist/
-wheels/
-*.egg-info/
-
-# Git
-.git/
-.gitignore
-.gitattributes
-
-# Outputs and artifacts (mount as volumes instead)
-outputs/
-mlruns/
+# Project specific
 mlflow.db
-mlflow.db-shm
-mlflow.db-wal
+mlruns
+outputs
+data
 *.log
-*.pt
-*.pth
-*.ckpt
-*.safetensors
-wandb/
-
-# Data (mount as volume instead)
-data/
-*.csv
-*.json
-*.pkl
-*.pickle
+*.pid
 
 # Documentation
-docs/
+docs
 *.md
 !README.md
 
-# Dev containers
-.devcontainer/
-
-# CI/CD
-.github/
-.gitlab-ci.yml
-.travis.yml
-azure-pipelines.yml
-
-# Pre-commit
+# Tests
+tests
 .pre-commit-config.yaml
 
-# Environment files
-.env
-.env.*
-*.env
+# CI/CD
+.github
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
+# Dev containers
+.devcontainer
 
-# Benchmarks
-benchmarks/
-profiling/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.bak
-*.swp
-*~
-
-# OS-specific
-Thumbs.db
-Desktop.ini
-
-# Large model files
-models/
-checkpoints/
-weights/
-
-# Security
-secrets/
-*.key
-*.pem
-*.crt
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
