@@ -1,39 +1,40 @@
 #!/usr/bin/env python
-"""Alerting system for model monitoring (Phase 17).
+"""Alert system for monitoring thresholds (Phase 26).
 
-This module provides alerting functionality including:
-- Alert rules and conditions
-- Multiple notification channels
-- Alert aggregation and deduplication
-- Severity levels
+This module provides an alert system for notifying about threshold violations,
+anomalies, and other monitoring events.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from typing import Any, Callable
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AlertSeverity(Enum):
+class AlertSeverity(str, Enum):
     """Alert severity levels."""
 
     INFO = "info"
     WARNING = "warning"
+    ERROR = "error"
     CRITICAL = "critical"
 
 
-class AlertChannel(Enum):
-    """Alert notification channels."""
+class AlertStatus(str, Enum):
+    """Alert status."""
+
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+    ACKNOWLEDGED = "acknowledged"
+
+
+class AlertChannel(str, Enum):
+    """Alert notification channels (backward compatibility from Phase 17)."""
 
     LOG = "log"
     EMAIL = "email"
@@ -43,51 +44,90 @@ class AlertChannel(Enum):
 
 
 @dataclass
-class AlertRule:
-    """An alert rule definition."""
+class Alert:
+    """Single alert."""
 
-    name: str
-    condition: Callable[[], bool]
+    alert_id: str
+    title: str
+    description: str
     severity: AlertSeverity
-    message_template: str
-    channels: list[AlertChannel] = field(default_factory=lambda: [AlertChannel.LOG])
-    cooldown_minutes: int = 60  # Min time between alerts
+    status: AlertStatus = AlertStatus.ACTIVE
+
+    created_at: datetime = field(default_factory=datetime.now)
+    resolved_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+
+    details: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def resolve(self) -> None:
+        """Resolve the alert."""
+        self.status = AlertStatus.RESOLVED
+        self.resolved_at = datetime.now()
+
+    def acknowledge(self) -> None:
+        """Acknowledge the alert."""
+        self.status = AlertStatus.ACKNOWLEDGED
+        self.acknowledged_at = datetime.now()
+
+    def get_duration(self) -> timedelta:
+        """Get alert duration.
+
+        Returns:
+            Duration from creation to resolution (or now if unresolved)
+        """
+        end_time = self.resolved_at or datetime.now()
+        return end_time - self.created_at
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get alert summary.
+
+        Returns:
+            Summary dictionary
+        """
+        return {
+            "alert_id": self.alert_id,
+            "title": self.title,
+            "severity": self.severity.value,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "duration_seconds": self.get_duration().total_seconds(),
+            "details": self.details,
+        }
 
 
 @dataclass
-class Alert:
-    """A triggered alert."""
+class AlertRule:
+    """Alert rule definition."""
 
-    rule_name: str
+    rule_id: str
+    name: str
+    condition: Callable[[], bool]  # Function that returns True if alert should fire
     severity: AlertSeverity
-    message: str
-    timestamp: datetime
+    description: str
+
+    # Threshold settings
+    cooldown_seconds: int = 300  # Don't re-alert within this period
+    consecutive_violations: int = 1  # Require N consecutive violations
+
+    # State
+    last_alert_time: datetime | None = None
+    consecutive_count: int = 0
+    is_enabled: bool = True
+
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AlertManager:
-    """Manage and dispatch alerts."""
+    """Manage alerts and alert rules."""
 
-    def __init__(
-        self,
-        alert_log_file: Path | str | None = None,
-    ):
-        """Initialize alert manager.
-
-        Args:
-            alert_log_file: File to log alerts to
-        """
+    def __init__(self):
+        """Initialize alert manager."""
         self.rules: dict[str, AlertRule] = {}
+        self.active_alerts: dict[str, Alert] = {}
         self.alert_history: list[Alert] = []
-        self.last_alert_time: dict[str, datetime] = {}
-        self.alert_log_file: Path | None
-
-        # Configure alert log file
-        if alert_log_file:
-            self.alert_log_file = Path(alert_log_file)
-            self.alert_log_file.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            self.alert_log_file = None
+        self._alert_counter = 0
 
         LOGGER.info("Initialized AlertManager")
 
@@ -97,243 +137,343 @@ class AlertManager:
         Args:
             rule: Alert rule to add
         """
-        self.rules[rule.name] = rule
-        LOGGER.debug("Added alert rule: %s", rule.name)
+        self.rules[rule.rule_id] = rule
+        LOGGER.info(f"Added alert rule: {rule.rule_id}")
 
-    def _should_send_alert(self, rule_name: str, cooldown_minutes: int) -> bool:
-        """Check if alert should be sent (respects cooldown).
+    def remove_rule(self, rule_id: str) -> bool:
+        """Remove an alert rule.
 
         Args:
-            rule_name: Name of the rule
-            cooldown_minutes: Cooldown period in minutes
+            rule_id: Rule ID to remove
 
         Returns:
-            True if alert should be sent
+            True if removed, False if not found
         """
-        if rule_name not in self.last_alert_time:
+        if rule_id in self.rules:
+            del self.rules[rule_id]
+            LOGGER.info(f"Removed alert rule: {rule_id}")
             return True
 
-        last_time = self.last_alert_time[rule_name]
-        cooldown = timedelta(minutes=cooldown_minutes)
+        return False
 
-        return datetime.now() - last_time > cooldown
-
-    def _send_to_log(self, alert: Alert) -> None:
-        """Send alert to log.
+    def enable_rule(self, rule_id: str) -> bool:
+        """Enable an alert rule.
 
         Args:
-            alert: Alert to send
-        """
-        severity_map = {
-            AlertSeverity.INFO: logging.INFO,
-            AlertSeverity.WARNING: logging.WARNING,
-            AlertSeverity.CRITICAL: logging.CRITICAL,
-        }
-
-        LOGGER.log(
-            severity_map[alert.severity],
-            "ALERT [%s]: %s",
-            alert.severity.value.upper(),
-            alert.message,
-        )
-
-    def _send_to_file(self, alert: Alert) -> None:
-        """Send alert to file.
-
-        Args:
-            alert: Alert to send
-        """
-        if self.alert_log_file is None:
-            return
-
-        alert_data = {
-            "rule_name": alert.rule_name,
-            "severity": alert.severity.value,
-            "message": alert.message,
-            "timestamp": alert.timestamp.isoformat(),
-            "metadata": alert.metadata,
-        }
-
-        with self.alert_log_file.open("a") as f:
-            f.write(json.dumps(alert_data) + "\n")
-
-    def _send_to_email(self, alert: Alert) -> None:
-        """Send alert via email.
-
-        Args:
-            alert: Alert to send
-        """
-        # Placeholder for email integration
-        LOGGER.info("Would send email alert: %s", alert.message)
-
-    def _send_to_slack(self, alert: Alert) -> None:
-        """Send alert to Slack.
-
-        Args:
-            alert: Alert to send
-        """
-        # Placeholder for Slack integration
-        LOGGER.info("Would send Slack alert: %s", alert.message)
-
-    def _send_to_pagerduty(self, alert: Alert) -> None:
-        """Send alert to PagerDuty.
-
-        Args:
-            alert: Alert to send
-        """
-        # Placeholder for PagerDuty integration
-        LOGGER.info("Would send PagerDuty alert: %s", alert.message)
-
-    def _dispatch_alert(self, alert: Alert, channels: list[AlertChannel]) -> None:
-        """Dispatch alert to configured channels.
-
-        Args:
-            alert: Alert to dispatch
-            channels: List of channels to send to
-        """
-        for channel in channels:
-            if channel == AlertChannel.LOG:
-                self._send_to_log(alert)
-            elif channel == AlertChannel.FILE:
-                self._send_to_file(alert)
-            elif channel == AlertChannel.EMAIL:
-                self._send_to_email(alert)
-            elif channel == AlertChannel.SLACK:
-                self._send_to_slack(alert)
-            elif channel == AlertChannel.PAGERDUTY:
-                self._send_to_pagerduty(alert)
-
-    def check_rules(self, context: dict[str, Any] | None = None) -> list[Alert]:
-        """Check all alert rules.
-
-        Args:
-            context: Optional context for message formatting
+            rule_id: Rule ID
 
         Returns:
-            List of triggered alerts
+            True if enabled, False if not found
         """
-        if context is None:
-            context = {}
+        if rule_id in self.rules:
+            self.rules[rule_id].is_enabled = True
+            LOGGER.info(f"Enabled alert rule: {rule_id}")
+            return True
 
-        triggered_alerts = []
+        return False
+
+    def disable_rule(self, rule_id: str) -> bool:
+        """Disable an alert rule.
+
+        Args:
+            rule_id: Rule ID
+
+        Returns:
+            True if disabled, False if not found
+        """
+        if rule_id in self.rules:
+            self.rules[rule_id].is_enabled = False
+            LOGGER.info(f"Disabled alert rule: {rule_id}")
+            return True
+
+        return False
+
+    def check_rules(self) -> list[Alert]:
+        """Check all rules and generate alerts.
+
+        Returns:
+            List of newly created alerts
+        """
+        new_alerts = []
 
         for rule in self.rules.values():
+            if not rule.is_enabled:
+                continue
+
             try:
                 # Check condition
-                if not rule.condition():
-                    continue
+                is_violated = rule.condition()
 
-                # Check cooldown
-                if not self._should_send_alert(rule.name, rule.cooldown_minutes):
-                    LOGGER.debug(
-                        "Alert %s in cooldown period",
-                        rule.name,
-                    )
-                    continue
+                if is_violated:
+                    rule.consecutive_count += 1
 
-                # Create alert
-                message = rule.message_template.format(**context)
-                alert = Alert(
-                    rule_name=rule.name,
-                    severity=rule.severity,
-                    message=message,
-                    timestamp=datetime.now(),
-                    metadata=context,
-                )
+                    # Check if we should fire alert
+                    if rule.consecutive_count >= rule.consecutive_violations:
+                        # Check cooldown
+                        if self._is_in_cooldown(rule):
+                            continue
 
-                # Dispatch alert
-                self._dispatch_alert(alert, rule.channels)
+                        # Create alert
+                        alert = self._create_alert(rule)
+                        new_alerts.append(alert)
 
-                # Record alert
-                self.alert_history.append(alert)
-                self.last_alert_time[rule.name] = alert.timestamp
-                triggered_alerts.append(alert)
+                        # Reset counter and update last alert time
+                        rule.consecutive_count = 0
+                        rule.last_alert_time = datetime.now()
 
-                LOGGER.info(
-                    "Triggered alert: %s (%s)",
-                    rule.name,
-                    rule.severity.value,
-                )
+                else:
+                    # Reset counter if condition not violated
+                    rule.consecutive_count = 0
 
-            except Exception:
-                LOGGER.exception("Error checking rule %s", rule.name)
+            except Exception as e:
+                LOGGER.error(f"Error checking rule {rule.rule_id}: {e}")
 
-        return triggered_alerts
+        return new_alerts
 
-    def get_recent_alerts(
-        self,
-        hours: int = 24,
-    ) -> list[Alert]:
-        """Get recent alerts.
+    def _is_in_cooldown(self, rule: AlertRule) -> bool:
+        """Check if rule is in cooldown period.
 
         Args:
-            hours: Number of hours to look back
+            rule: Alert rule
 
         Returns:
-            List of recent alerts
+            True if in cooldown
         """
-        cutoff = datetime.now() - timedelta(hours=hours)
-        return [alert for alert in self.alert_history if alert.timestamp > cutoff]
+        if rule.last_alert_time is None:
+            return False
 
-    def get_summary(self) -> dict[str, Any]:
-        """Get alerting summary.
+        elapsed = (datetime.now() - rule.last_alert_time).total_seconds()
+        return elapsed < rule.cooldown_seconds
+
+    def _create_alert(self, rule: AlertRule) -> Alert:
+        """Create alert from rule.
+
+        Args:
+            rule: Alert rule
 
         Returns:
-            Summary dict
+            Created alert
         """
-        recent_alerts = self.get_recent_alerts(hours=24)
+        self._alert_counter += 1
+        alert_id = f"alert_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._alert_counter:06d}"
 
+        alert = Alert(
+            alert_id=alert_id,
+            title=rule.name,
+            description=rule.description,
+            severity=rule.severity,
+            metadata={"rule_id": rule.rule_id},
+        )
+
+        # Store alert
+        self.active_alerts[alert_id] = alert
+        self.alert_history.append(alert)
+
+        LOGGER.warning(
+            f"Alert fired: {alert.title} (severity={alert.severity.value})"
+        )
+
+        return alert
+
+    def resolve_alert(self, alert_id: str) -> bool:
+        """Resolve an alert.
+
+        Args:
+            alert_id: Alert ID
+
+        Returns:
+            True if resolved, False if not found
+        """
+        if alert_id in self.active_alerts:
+            alert = self.active_alerts[alert_id]
+            alert.resolve()
+
+            # Remove from active
+            del self.active_alerts[alert_id]
+
+            LOGGER.info(f"Resolved alert: {alert_id}")
+            return True
+
+        return False
+
+    def acknowledge_alert(self, alert_id: str) -> bool:
+        """Acknowledge an alert.
+
+        Args:
+            alert_id: Alert ID
+
+        Returns:
+            True if acknowledged, False if not found
+        """
+        if alert_id in self.active_alerts:
+            alert = self.active_alerts[alert_id]
+            alert.acknowledge()
+
+            LOGGER.info(f"Acknowledged alert: {alert_id}")
+            return True
+
+        return False
+
+    def get_active_alerts(
+        self,
+        severity: AlertSeverity | None = None,
+    ) -> list[Alert]:
+        """Get active alerts.
+
+        Args:
+            severity: Filter by severity
+
+        Returns:
+            List of active alerts
+        """
+        alerts = list(self.active_alerts.values())
+
+        if severity:
+            alerts = [a for a in alerts if a.severity == severity]
+
+        return alerts
+
+    def get_alert_history(
+        self,
+        since: datetime | None = None,
+        severity: AlertSeverity | None = None,
+    ) -> list[Alert]:
+        """Get alert history.
+
+        Args:
+            since: Get alerts since this time
+            severity: Filter by severity
+
+        Returns:
+            List of alerts
+        """
+        alerts = self.alert_history
+
+        if since:
+            alerts = [a for a in alerts if a.created_at >= since]
+
+        if severity:
+            alerts = [a for a in alerts if a.severity == severity]
+
+        return alerts
+
+    def get_alert_summary(self) -> dict[str, Any]:
+        """Get alert summary.
+
+        Returns:
+            Summary dictionary
+        """
         # Count by severity
         severity_counts = {
-            AlertSeverity.INFO: 0,
-            AlertSeverity.WARNING: 0,
-            AlertSeverity.CRITICAL: 0,
+            "info": 0,
+            "warning": 0,
+            "error": 0,
+            "critical": 0,
         }
 
-        for alert in recent_alerts:
-            severity_counts[alert.severity] += 1
+        for alert in self.active_alerts.values():
+            severity_counts[alert.severity.value] += 1
+
+        # Count by status
+        status_counts = {
+            "active": len(self.active_alerts),
+            "resolved": sum(
+                1 for a in self.alert_history if a.status == AlertStatus.RESOLVED
+            ),
+            "acknowledged": sum(
+                1 for a in self.active_alerts.values()
+                if a.status == AlertStatus.ACKNOWLEDGED
+            ),
+        }
 
         return {
-            "timestamp": datetime.now().isoformat(),
-            "total_rules": len(self.rules),
-            "alerts_last_24h": len(recent_alerts),
-            "severity_counts": {
-                severity.value: count for severity, count in severity_counts.items()
-            },
-            "recent_alerts": [
-                {
-                    "rule_name": alert.rule_name,
-                    "severity": alert.severity.value,
-                    "message": alert.message,
-                    "timestamp": alert.timestamp.isoformat(),
-                }
-                for alert in recent_alerts[-10:]  # Last 10 alerts
-            ],
+            "total_active": len(self.active_alerts),
+            "total_history": len(self.alert_history),
+            "by_severity": severity_counts,
+            "by_status": status_counts,
+            "num_rules": len(self.rules),
+            "num_enabled_rules": sum(1 for r in self.rules.values() if r.is_enabled),
         }
 
 
-def send_alert(
-    message: str,
-    severity: AlertSeverity = AlertSeverity.INFO,
-    channels: list[AlertChannel] | None = None,
-) -> None:
-    """Send an alert (convenience function).
+def create_threshold_rule(
+    rule_id: str,
+    name: str,
+    get_value: Callable[[], float],
+    threshold: float,
+    comparison: str = ">",  # ">", "<", ">=", "<=", "==", "!="
+    severity: AlertSeverity = AlertSeverity.WARNING,
+) -> AlertRule:
+    """Create a threshold-based alert rule.
 
     Args:
-        message: Alert message
+        rule_id: Rule ID
+        name: Rule name
+        get_value: Function to get current value
+        threshold: Threshold value
+        comparison: Comparison operator
         severity: Alert severity
-        channels: Notification channels
+
+    Returns:
+        Alert rule
+
+    Example:
+        rule = create_threshold_rule(
+            rule_id="high_latency",
+            name="High Latency",
+            get_value=lambda: monitor.get_current_metrics().mean_latency,
+            threshold=1.0,
+            comparison=">",
+            severity=AlertSeverity.WARNING,
+        )
     """
-    if channels is None:
-        channels = [AlertChannel.LOG]
+    comparisons = {
+        ">": lambda v, t: v > t,
+        "<": lambda v, t: v < t,
+        ">=": lambda v, t: v >= t,
+        "<=": lambda v, t: v <= t,
+        "==": lambda v, t: v == t,
+        "!=": lambda v, t: v != t,
+    }
 
-    manager = AlertManager()
+    if comparison not in comparisons:
+        msg = f"Invalid comparison: {comparison}"
+        raise ValueError(msg)
 
-    alert = Alert(
-        rule_name="ad_hoc",
+    def condition() -> bool:
+        value = get_value()
+        return comparisons[comparison](value, threshold)
+
+    return AlertRule(
+        rule_id=rule_id,
+        name=name,
+        condition=condition,
         severity=severity,
-        message=message,
-        timestamp=datetime.now(),
+        description=f"{name}: value {comparison} {threshold}",
+        metadata={"threshold": threshold, "comparison": comparison},
     )
 
-    manager._dispatch_alert(alert, channels)
+
+def create_drift_alert_rule(
+    rule_id: str,
+    check_drift: Callable[[], bool],  # Returns True if drift detected
+    severity: AlertSeverity = AlertSeverity.WARNING,
+) -> AlertRule:
+    """Create a drift detection alert rule.
+
+    Args:
+        rule_id: Rule ID
+        check_drift: Function that returns True if drift detected
+        severity: Alert severity
+
+    Returns:
+        Alert rule
+    """
+    return AlertRule(
+        rule_id=rule_id,
+        name="Data Drift Detected",
+        condition=check_drift,
+        severity=severity,
+        description="Prediction distribution has drifted from reference",
+        consecutive_violations=2,  # Require 2 consecutive detections
+    )
