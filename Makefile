@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability test-data-quality
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab test-interpretability test-data-quality test-feature-store
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -126,6 +126,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Data Quality & Drift Detection (Phase 23):$(NC)"
 	@echo "  make test-data-quality  - Test drift detection, validation, quality metrics, anomaly detection"
+	@echo ""
+	@echo "$(GREEN)Feature Store & Engineering (Phase 24):$(NC)"
+	@echo "  make test-feature-store - Test feature registry, versioning, computation, serving"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -526,6 +529,22 @@ test-data-quality:
 	poetry run python scripts/test_data_quality.py
 	@echo ""
 	@echo "$(GREEN)✓ Data quality tests completed!$(NC)"
+
+## test-feature-store: Test feature store and engineering framework
+test-feature-store:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 24: Testing Feature Store & Engineering$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Feature registry (registration, groups, search)"
+	@echo "  - Feature versioning (lifecycle, lineage)"
+	@echo "  - Feature computation (caching, dependencies)"
+	@echo "  - Feature serving (online, batch, vectors)"
+	@echo ""
+	poetry run python scripts/test_feature_store.py
+	@echo ""
+	@echo "$(GREEN)✓ Feature store tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
