@@ -1,7 +1,7 @@
 .PHONY: help setup install clean clean-all
 .PHONY: groundtruth train train-evidence
 .PHONY: hpo-s0 hpo-s1 hpo-s2 refit eval export
-.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry
+.PHONY: test-deployment test-experiment test-cicd test-monitoring test-api test-security test-registry test-ab
 .PHONY: lint format test test-cov test-groundtruth
 .PHONY: pre-commit-install pre-commit-run
 .PHONY: tune-criteria-max tune-evidence-max tune-evidence-aug tune-evidence-joint tune-share-max tune-joint-max
@@ -117,6 +117,9 @@ help:
 	@echo ""
 	@echo "$(GREEN)Model Registry (Phase 20):$(NC)"
 	@echo "  make test-registry      - Test model versioning, metadata, promotion workflows, lineage tracking"
+	@echo ""
+	@echo "$(GREEN)A/B Testing & Experimentation (Phase 21):$(NC)"
+	@echo "  make test-ab            - Test A/B testing framework (traffic splitting, experiments, stats, tracking)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
@@ -458,6 +461,29 @@ test-registry:
 	poetry run python scripts/test_registry.py
 	@echo ""
 	@echo "$(GREEN)✓ Model registry tests completed!$(NC)"
+
+#==============================================================================
+# A/B Testing & Experimentation (Phase 21)
+#==============================================================================
+
+## test-ab: Test A/B testing and experimentation framework
+test-ab:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 21: Testing A/B Testing & Experimentation$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Traffic splitting strategies (uniform, weighted, sticky)"
+	@echo "  - Experiment lifecycle management"
+	@echo "  - Statistical significance testing (t-test)"
+	@echo "  - Bayesian analysis"
+	@echo "  - Experiment tracking and metrics"
+	@echo "  - Metric aggregation and conversion rates"
+	@echo "  - Sample size calculation"
+	@echo ""
+	poetry run python scripts/test_ab_testing.py
+	@echo ""
+	@echo "$(GREEN)✓ A/B testing tests completed!$(NC)"
 
 #==============================================================================
 # SUPERMAX Multi-Stage HPO (Stage-A/B/C)
