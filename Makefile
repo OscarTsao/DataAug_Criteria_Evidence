@@ -145,6 +145,9 @@ help:
 	@echo "$(GREEN)Model Serving & Deployment (Phase 29):$(NC)"
 	@echo "  make test-serving        - Test model loading, prediction API, batch inference, monitoring"
 	@echo ""
+	@echo "$(GREEN)Deployment Automation & CI/CD (Phase 30):$(NC)"
+	@echo "  make test-deployment     - Test deployment strategies, health checks, rollback, orchestration"
+	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make lint               - Run linters (ruff + black --check)"
 	@echo "  make typecheck          - Run mypy type checking"
@@ -501,6 +504,24 @@ test-serving:
 	poetry run python scripts/test_serving.py
 	@echo ""
 	@echo "$(GREEN)✓ Model serving tests completed!$(NC)"
+
+test-deployment:
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo "$(BLUE)Phase 30: Testing Deployment Automation & CI/CD$(NC)"
+	@echo "$(BLUE)===========================================================$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Testing:$(NC)"
+	@echo "  - Deployment configuration and management"
+	@echo "  - Deployment strategies (direct, blue-green, canary, rolling)"
+	@echo "  - Health check validation"
+	@echo "  - Metrics validation (error rates)"
+	@echo "  - Rollback mechanisms (manual and automatic)"
+	@echo "  - Auto-rollback monitoring"
+	@echo "  - Deployment orchestration"
+	@echo ""
+	poetry run python scripts/test_deployment.py
+	@echo ""
+	@echo "$(GREEN)✓ Deployment automation tests completed!$(NC)"
 
 #==============================================================================
 # A/B Testing & Experimentation (Phase 21)

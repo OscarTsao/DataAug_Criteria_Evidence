@@ -1,108 +1,131 @@
-"""Production deployment and model registry (Phase 14).
+#!/usr/bin/env python
+"""Deployment automation and CI/CD pipelines (Phase 30).
 
-This module provides tools for deploying, versioning, and managing
-optimized models in production environments.
+This module provides comprehensive deployment automation including:
+- Multiple deployment strategies (direct, blue-green, canary, rolling)
+- Health check validation
+- Automatic rollback mechanisms
+- Deployment orchestration
 
-Key Features:
-- MLflow Model Registry integration
-- Model versioning and tagging
-- Model packaging and export
-- Deployment configuration management
-- Model serving utilities
-- Production monitoring setup
+Key Components:
+- DeploymentOrchestrator: Main orchestrator for deployments
+- DeploymentConfig: Configuration for deployments
+- DeploymentStrategy: Strategy pattern for different deployment types
+- HealthValidator: Health check validation
+- RollbackManager: Rollback management
 
-Example Usage:
+Integration:
+- Phase 28: Model registry for version management
+- Phase 29: Model serving infrastructure
 
-    # Register model to MLflow
-    from psy_agents_noaug.deployment import ModelRegistry
-
-    registry = ModelRegistry(tracking_uri="sqlite:///mlflow.db")
-
-    # Register best model from HPO
-    model_version = registry.register_model_from_checkpoint(
-        model_name="criteria_classifier",
-        checkpoint_path="outputs/checkpoints/best_model.pt",
-        tags={"architecture": "roberta", "task": "criteria"},
+Example:
+    ```python
+    from psy_agents_noaug.deployment import (
+        DeploymentOrchestrator,
+        create_deployment_config,
+        DeploymentEnvironment,
+        StrategyEnum,
     )
 
-    # Transition to production
-    registry.transition_model_stage(
-        model_name="criteria_classifier",
-        version=model_version,
-        stage="Production",
+    # Create deployment configuration
+    config = create_deployment_config(
+        deployment_id="deploy_001",
+        model_name="sentiment_model",
+        model_version="v2.0.0",
+        environment=DeploymentEnvironment.PRODUCTION,
+        strategy=StrategyEnum.BLUE_GREEN,
+        host="api.example.com",
+        port=443,
     )
 
-    # Load production model
-    from psy_agents_noaug.deployment import ModelLoader
+    # Execute deployment
+    orchestrator = DeploymentOrchestrator()
+    record = orchestrator.deploy(config, previous_version="v1.0.0")
 
-    loader = ModelLoader(registry=registry)
-    model = loader.load_production_model("criteria_classifier")
-
-    # Create deployment package
-    from psy_agents_noaug.deployment import DeploymentPackager
-
-    packager = DeploymentPackager()
-    package_path = packager.create_deployment_package(
-        model_name="criteria_classifier",
-        version=model_version,
-        output_dir="outputs/deployment/",
-        include_dependencies=True,
-    )
-
-    # Deploy model
-    from psy_agents_noaug.deployment import ModelDeployer
-
-    deployer = ModelDeployer()
-    deployment = deployer.deploy_model(
-        package_path=package_path,
-        deployment_config={
-            "name": "criteria-classifier-v1",
-            "replicas": 3,
-            "resources": {"cpu": "1000m", "memory": "2Gi"},
-        },
-    )
+    # Check deployment status
+    if record.status == DeploymentStatus.COMPLETED:
+        print("Deployment successful!")
+    elif record.status == DeploymentStatus.ROLLED_BACK:
+        print(f"Deployment rolled back: {record.error_message}")
+    ```
 """
 
-# Registry
-# Deployment
-from psy_agents_noaug.deployment.deployer import (
+from __future__ import annotations
+
+# Configuration
+from psy_agents_noaug.deployment.deployment_config import (
     DeploymentConfig,
-    ModelDeployer,
-    deploy_model,
+    DeploymentEnvironment,
+    DeploymentRecord,
+    DeploymentStatus,
+    DeploymentStrategy as StrategyEnum,
+    DeploymentTarget,
+    HealthCheckConfig,
+    ResourceRequirements,
+    create_deployment_config,
 )
 
-# Loading
-from psy_agents_noaug.deployment.loader import (
-    ModelLoader,
-    load_model_from_registry,
+# Health validation
+from psy_agents_noaug.deployment.health_validator import (
+    HealthCheckResult,
+    HealthValidator,
+    MetricsValidator,
+    create_health_validator,
 )
 
-# Packaging
-from psy_agents_noaug.deployment.packager import (
-    DeploymentPackager,
-    PackageConfig,
-    create_deployment_package,
+# Orchestration
+from psy_agents_noaug.deployment.orchestrator import (
+    DeploymentOrchestrator,
+    create_orchestrator,
 )
-from psy_agents_noaug.deployment.registry import (
-    ModelMetadata,
-    ModelRegistry,
-    get_production_models,
+
+# Rollback
+from psy_agents_noaug.deployment.rollback import (
+    AutoRollbackMonitor,
+    RollbackManager,
+    RollbackState,
+    create_rollback_manager,
+)
+
+# Strategies
+from psy_agents_noaug.deployment.strategies import (
+    BlueGreenDeploymentStrategy,
+    CanaryDeploymentStrategy,
+    DeploymentStrategy,
+    DirectDeploymentStrategy,
+    RollingDeploymentStrategy,
+    get_strategy,
 )
 
 __all__ = [
-    # Registry
-    "ModelRegistry",
-    "ModelMetadata",
-    "get_production_models",
-    # Loading
-    "ModelLoader",
-    "load_model_from_registry",
-    # Packaging
-    "DeploymentPackager",
-    "PackageConfig",
-    "create_deployment_package",
-    # Deployment
-    "ModelDeployer",
+    # Configuration
     "DeploymentConfig",
-    "deploy_model",
+    "DeploymentEnvironment",
+    "DeploymentRecord",
+    "DeploymentStatus",
+    "StrategyEnum",
+    "DeploymentTarget",
+    "HealthCheckConfig",
+    "ResourceRequirements",
+    "create_deployment_config",
+    # Health validation
+    "HealthValidator",
+    "HealthCheckResult",
+    "MetricsValidator",
+    "create_health_validator",
+    # Orchestration
+    "DeploymentOrchestrator",
+    "create_orchestrator",
+    # Rollback
+    "RollbackManager",
+    "RollbackState",
+    "AutoRollbackMonitor",
+    "create_rollback_manager",
+    # Strategies
+    "DeploymentStrategy",
+    "DirectDeploymentStrategy",
+    "BlueGreenDeploymentStrategy",
+    "CanaryDeploymentStrategy",
+    "RollingDeploymentStrategy",
+    "get_strategy",
 ]
